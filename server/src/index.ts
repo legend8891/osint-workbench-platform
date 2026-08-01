@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 import { sampleApiCaseResponse } from './routes/sample.js';
 import { scanRouter } from './routes/scan.js';
+import { frameworkRouter } from './routes/framework.js';
+import { getProviderStatuses } from './services/framework.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -13,11 +15,16 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
 app.get('/health', (_req, res) => {
+  const providers = getProviderStatuses();
   res.json({
     ok: true,
     service: 'osint-workbench-api',
-    version: '0.7.0',
-    providers: ['sherlock'],
+    version: '0.8.0',
+    providers: providers.filter((p) => p.configured).map((p) => p.id),
+    framework: {
+      categories: true,
+      path: '/api/framework',
+    },
   });
 });
 
@@ -26,6 +33,7 @@ app.get('/api/cases/sample', (_req, res) => {
 });
 
 app.use('/api/scan', scanRouter);
+app.use('/api/framework', frameworkRouter);
 
 const clientDist = path.resolve(__dirname, '../../client/dist');
 if (existsSync(clientDist)) {
@@ -40,6 +48,7 @@ if (existsSync(clientDist)) {
 const PORT = Number(process.env.PORT) || 8787;
 app.listen(PORT, () => {
   console.log(`OSINT Workbench listening on http://localhost:${PORT}`);
-  console.log(`  Health:  GET  /health`);
-  console.log(`  Sherlock: POST /api/scan/sherlock`);
+  console.log(`  Health:     GET  /health`);
+  console.log(`  Framework:  GET  /api/framework`);
+  console.log(`  Sherlock:   POST /api/scan/sherlock`);
 });
