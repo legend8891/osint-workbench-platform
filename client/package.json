@@ -11,19 +11,19 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "jszip": "^3.10.1",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "shared": "*",
-    "zod": "^3.23.8"
-  },
-  "devDependencies": {
     "@types/node": "^22.5.0",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
-    "eslint": "^9.9.0",
+    "jszip": "^3.10.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "shared": "*",
     "typescript": "^5.5.4",
-    "vite": "^5.4.2"
+    "vite": "^5.4.2",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "eslint": "^9.9.0"
   }
 }
