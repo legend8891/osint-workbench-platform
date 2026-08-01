@@ -1,0 +1,109 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f7f6f2;
+  --fg: #28251d;
+  --muted: #6f6d68;
+  --accent: #01696f;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+}
+button, input, textarea, select { font: inherit; }
+.shell { padding: 1rem; display: grid; gap: 1rem; max-width: 72rem; margin: 0 auto; }
+.topbar, .panel, .card {
+  border: 1px solid rgba(0,0,0,.1);
+  border-radius: 16px;
+  background: #fff;
+}
+.topbar, .panel { padding: 1rem; }
+.eyebrow {
+  font-size: .75rem;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  color: var(--muted);
+}
+.tabs {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: .5rem;
+}
+.tabs button, .action, .selectable {
+  min-height: 44px;
+  border: none;
+  border-radius: 999px;
+  background: #e9efee;
+  padding: .75rem 1rem;
+  cursor: pointer;
+}
+.tabs button.active, .action {
+  background: var(--accent);
+  color: #fff;
+}
+.grid { display: grid; gap: 1rem; }
+.full { grid-column: 1 / -1; }
+.cards {
+  display: grid;
+  gap: .75rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+.card {
+  padding: 1rem;
+  display: grid;
+  gap: .5rem;
+  text-align: left;
+}
+.two-col {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+.line-item {
+  padding: .75rem 1rem;
+  border-radius: 12px;
+  background: #f3f0ec;
+  margin-bottom: .5rem;
+}
+.stats {
+  display: grid;
+  gap: .75rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.stats div {
+  padding: .75rem;
+  border-radius: 12px;
+  background: #f3f0ec;
+  display: grid;
+}
+.actions-row { display: flex; gap: .75rem; flex-wrap: wrap; }
+.muted { color: var(--muted); font-size: .9rem; }
+.archive { font-size: .85rem; color: var(--accent); }
+.match-list {
+  margin: .4rem 0 0;
+  padding-left: 1.2rem;
+  font-size: .9rem;
+}
+@media (max-width: 640px) {
+  .tabs { grid-template-columns: repeat(3, 1fr); }
+  .stats { grid-template-columns: 1fr; }
+}
+@media (prefers-color-scheme: dark) {
+  body { background: #171614; color: #cdccca; }
+  .topbar, .panel, .card { background: #1c1b19; border-color: #393836; }
+  .line-item, .stats div, .tabs button, .selectable { background: #22211f; color: #cdccca; }
+  .tabs button.active, .action { background: var(--accent); color: #fff; }
+}
+
+.sherlock-panel {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(0,0,0,.08);
+}
+.sherlock-panel input:disabled,
+.sherlock-panel button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
