@@ -1,10 +1,22 @@
 import JSZip from 'jszip';
 import type { CaseRecord, CorrelationHit } from 'shared';
 
+/**
+ * Normalize identifier tokens for correlation.
+ * - trim + lowercase
+ * - collapse internal whitespace
+ * Future: leet, separators, alternate spellings can be added here.
+ */
 function normalizeToken(raw: string): string {
   return raw.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
+/**
+ * Build cross-case correlation hits.
+ * Only tokens that appear in more than one distinct caseId are emitted.
+ * Confidence of the hit is the lowest confidence among contributing entities
+ * (conservative). Matches preserve full evidence chain (case + entity).
+ */
 export function buildCorrelationHits(cases: CaseRecord[]): CorrelationHit[] {
   const tokenMap = new Map<string, CorrelationHit['matches']>();
 
@@ -120,6 +132,13 @@ export async function exportBundleZip(record: CaseRecord, correlationHits: Corre
   setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }
 
+/**
+ * Build GraphML (XML) for entities + relationships.
+ * Suitable for import into Maltego (tabular/GraphML workflows), yEd, Gephi, etc.
+ * Confidence and identifiers are preserved as node/edge data attributes.
+ * Correlation-only tokens that are not already entities are emitted as extra nodes
+ * linked via a synthetic "correlates_with" edge when useful for Maltego pivoting.
+ */
 export function buildGraphML(
   record: CaseRecord,
   correlationHits: CorrelationHit[] = []
@@ -153,6 +172,7 @@ export function buildGraphML(
 
   const nodesXml = record.entities
     .map((e) => {
+      // Never auto-VERIFIED: map confidence to explicit verification label
       const verification =
         e.confidence === 'High' ? 'POSSIBLE_HIGH' : `POSSIBLE_${e.confidence.toUpperCase()}`;
       return `    <node id="${escapeXml(e.id)}">
@@ -166,6 +186,7 @@ export function buildGraphML(
     })
     .join('\n');
 
+  // Evidence as optional URL nodes (linked to first related entity)
   const evidenceNodes = record.evidence
     .map((ev) => {
       const id = `evidence-${ev.id}`;
@@ -206,6 +227,7 @@ export function buildGraphML(
     .filter(Boolean)
     .join('\n');
 
+  // Optional: surface cross-case correlation tokens as annotation nodes
   const corrAnnotation = correlationHits
     .filter((h) => h.matches.some((m) => m.caseId === record.id))
     .map((h, idx) => {
@@ -244,6 +266,8 @@ export function buildGraphML(
   xsi:schemaLocation="http://graphml.graphdrawing.org/xmlns http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd">
 ${keysXml}
   <graph id="${escapeXml(record.id)}" edgedefault="directed">
+    <!-- Case: ${escapeXml(record.name)} | location: ${escapeXml(record.location)} -->
+    <!-- All confidence values are source labels; verification=* is never auto-VERIFIED -->
 ${nodesXml}
 ${evidenceNodes}
 ${corrAnnotation}
@@ -270,11 +294,11 @@ export function exportGraphML(
 
 function escapeXml(s: string): string {
   return s
-    .replace(/&/g, '&')
-    .replace(/</g, '<')
-    .replace(/>/g, '>')
-    .replace(/"/g, '"')
-    .replace(/'/g, ''');
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
 }
 
 function sanitizeFilename(name: string): string {
@@ -283,11 +307,15 @@ function sanitizeFilename(name: string): string {
 
 function escapeHtml(s: string): string {
   return s
-    .replace(/&/g, '&')
-    .replace(/</g, '<')
-    .replace(/>/g, '>')
-    .replace(/"/g, '"');
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
+
+// ---------------------------------------------------------------------------
+// Sherlock / external scan helpers
+// ---------------------------------------------------------------------------
 
 export type SherlockHit = {
   site: string;
@@ -318,6 +346,7 @@ export type SherlockApiResponse = {
   };
 };
 
+/** Call the server Sherlock provider. Uses Vite proxy (/api → :8787). */
 export async function runSherlockScan(
   usernames: string[]
 ): Promise<SherlockApiResponse> {
@@ -337,6 +366,10 @@ export async function runSherlockScan(
   return res.json() as Promise<SherlockApiResponse>;
 }
 
+/**
+ * Merge Sherlock results into a case. Preserves existing data;
+ * appends new entities / evidence / provenance. Does not auto-promote confidence.
+ */
 export function mergeScanIntoCase(
   record: CaseRecord,
   results: SherlockScanResult[]
@@ -353,6 +386,7 @@ export function mergeScanIntoCase(
 
   for (const result of results) {
     for (const entity of result.entities) {
+      // avoid exact id collision; keep if same name already present
       if (!next.entities.some((e) => e.id === entity.id)) {
         next.entities.push(entity);
       }
@@ -379,4 +413,71 @@ export function mergeScanIntoCase(
   }
 
   return next;
+}
+
+// ---------------------------------------------------------------------------
+// OSINT Framework catalog
+// ---------------------------------------------------------------------------
+
+export type FrameworkTool = {
+  id: string;
+  name: string;
+  description: string;
+  url: string;
+  urlTemplate?: string;
+  flag: string;
+  opsec: string;
+  providerId?: string;
+  inAppReady?: boolean;
+  openUrl?: string;
+};
+
+export type FrameworkCategory = {
+  id: string;
+  name: string;
+  description: string;
+  tools: FrameworkTool[];
+};
+
+export type FrameworkCatalog = {
+  source: string;
+  inspiredBy: string;
+  note: string;
+  categories: FrameworkCategory[];
+  providers: {
+    id: string;
+    name: string;
+    category: string;
+    envKey: string;
+    configured: boolean;
+    endpoint?: string;
+  }[];
+  summary: {
+    categories: number;
+    tools: number;
+    providersConfigured: number;
+    providersTotal: number;
+  };
+};
+
+export async function fetchFrameworkCatalog(): Promise<FrameworkCatalog> {
+  const res = await fetch('/api/framework');
+  if (!res.ok) {
+    throw new Error(`Framework catalog failed (${res.status})`);
+  }
+  return res.json() as Promise<FrameworkCatalog>;
+}
+
+export function launchFrameworkTool(tool: FrameworkTool, query: string) {
+  const q = encodeURIComponent(query.trim());
+  let url = tool.url;
+  if (tool.urlTemplate && query.trim()) {
+    url = tool.urlTemplate.replace(/\{q\}/g, q);
+  }
+  if (url.startsWith('/')) {
+    // in-app API — caller should use provider action instead
+    return url;
+  }
+  window.open(url, '_blank', 'noopener,noreferrer');
+  return url;
 }
