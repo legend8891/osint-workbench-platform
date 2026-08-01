@@ -1,0 +1,10 @@
+node_modules
+**/node_modules
+**/dist
+.git
+.env
+*.log
+.DS_Store
+.vite
+prisma/*.db
+artifacts
