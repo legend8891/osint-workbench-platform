@@ -14,10 +14,21 @@ import {
   exportGraphML,
   runSherlockScan,
   mergeScanIntoCase,
+  fetchFrameworkCatalog,
+  launchFrameworkTool,
   type SherlockScanResult,
+  type FrameworkCatalog,
 } from '../lib/workbench';
 
-const tabs = ['cases', 'entities', 'evidence', 'analysis', 'graph', 'report'] as const;
+const tabs = [
+  'cases',
+  'entities',
+  'evidence',
+  'analysis',
+  'graph',
+  'framework',
+  'report',
+] as const;
 type Tab = (typeof tabs)[number];
 
 export function App() {
@@ -31,6 +42,10 @@ export function App() {
   const [sherlockBusy, setSherlockBusy] = useState(false);
   const [sherlockLog, setSherlockLog] = useState<string[]>([]);
   const [lastSherlock, setLastSherlock] = useState<SherlockScanResult[] | null>(null);
+  const [framework, setFramework] = useState<FrameworkCatalog | null>(null);
+  const [frameworkError, setFrameworkError] = useState<string | null>(null);
+  const [frameworkQuery, setFrameworkQuery] = useState('');
+  const [frameworkLoading, setFrameworkLoading] = useState(false);
 
   const activeCase = useMemo(
     () => cases.find((c) => c.id === activeCaseId) ?? null,
@@ -55,6 +70,19 @@ export function App() {
       setCorrelationHits(buildCorrelationHits(updated));
       return updated;
     });
+  }
+
+  async function loadFramework() {
+    setFrameworkLoading(true);
+    setFrameworkError(null);
+    try {
+      const catalog = await fetchFrameworkCatalog();
+      setFramework(catalog);
+    } catch (err) {
+      setFrameworkError(err instanceof Error ? err.message : 'Failed to load framework');
+    } finally {
+      setFrameworkLoading(false);
+    }
   }
 
   async function handleSherlockScan() {
@@ -343,6 +371,123 @@ export function App() {
           </section>
         )}
 
+        {activeTab === 'framework' && (
+          <section className="panel full">
+            <h2>OSINT Framework</h2>
+            <p className="muted">
+              Category directory inspired by{' '}
+              <a href="https://osintframework.com/" target="_blank" rel="noreferrer">
+                osintframework.com
+              </a>
+              . External tools open in a new tab. Keys on the server show as configured.
+              Findings stay POSSIBLE until verified.
+            </p>
+            <div className="actions-row" style={{ marginBottom: '0.75rem' }}>
+              <input
+                type="text"
+                value={frameworkQuery}
+                onChange={(e) => setFrameworkQuery(e.target.value)}
+                placeholder="Query (username, email, domain, IP…)"
+                aria-label="Framework query"
+                style={{
+                  flex: 1,
+                  minHeight: 44,
+                  padding: '0.75rem 1rem',
+                  borderRadius: 999,
+                  border: '1px solid rgba(0,0,0,.15)',
+                  minWidth: 180,
+                }}
+              />
+              <button
+                className="action"
+                onClick={() => {
+                  if (!framework) void loadFramework();
+                  else void loadFramework();
+                }}
+                disabled={frameworkLoading}
+              >
+                {frameworkLoading ? 'Loading…' : framework ? 'Refresh catalog' : 'Load catalog'}
+              </button>
+            </div>
+            {frameworkError && <div className="line-item">{frameworkError}</div>}
+            {framework && (
+              <>
+                <div className="stats" style={{ marginBottom: '1rem' }}>
+                  <div>
+                    <span>Categories</span>
+                    <strong>{framework.summary.categories}</strong>
+                  </div>
+                  <div>
+                    <span>Tools</span>
+                    <strong>{framework.summary.tools}</strong>
+                  </div>
+                  <div>
+                    <span>Keys configured</span>
+                    <strong>
+                      {framework.summary.providersConfigured}/{framework.summary.providersTotal}
+                    </strong>
+                  </div>
+                </div>
+                {framework.categories.map((cat) => (
+                  <article key={cat.id} style={{ marginBottom: '1rem' }}>
+                    <h3>
+                      {cat.name}{' '}
+                      <span className="muted" style={{ fontWeight: 400, fontSize: '0.9rem' }}>
+                        — {cat.description}
+                      </span>
+                    </h3>
+                    <div className="cards">
+                      {cat.tools.map((tool) => (
+                        <div key={tool.id} className="card">
+                          <strong>{tool.name}</strong>
+                          <small>
+                            {tool.flag} · {tool.opsec}
+                            {tool.inAppReady ? ' · key ready' : ''}
+                          </small>
+                          <p className="muted">{tool.description}</p>
+                          <div className="actions-row">
+                            {tool.providerId === 'sherlock' ? (
+                              <button
+                                className="action"
+                                onClick={() => {
+                                  if (frameworkQuery.trim()) setSherlockInput(frameworkQuery.trim());
+                                  setActiveTab('graph');
+                                }}
+                              >
+                                Open Sherlock panel
+                              </button>
+                            ) : (
+                              <button
+                                className="action"
+                                onClick={() => launchFrameworkTool(tool, frameworkQuery)}
+                              >
+                                Open tool
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </article>
+                ))}
+                <article>
+                  <h3>Provider key status</h3>
+                  <p className="muted">Set these on Render → Environment (never commit secrets).</p>
+                  {framework.providers.map((p) => (
+                    <div key={p.id} className="line-item">
+                      <strong>{p.name}</strong> — {p.configured ? 'configured' : 'missing'}{' '}
+                      <span className="muted">({p.envKey})</span>
+                    </div>
+                  ))}
+                </article>
+              </>
+            )}
+            {!framework && !frameworkLoading && !frameworkError && (
+              <div className="line-item muted">Load the catalog to browse tools and key status.</div>
+            )}
+          </section>
+        )}
+
         {activeCase && activeTab === 'report' && (
           <section className="panel full actions">
             <h2>Exports — {activeCase.name}</h2>
@@ -387,3 +532,4 @@ export function App() {
     </div>
   );
 }
+                      
