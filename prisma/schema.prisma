@@ -1,0 +1,19 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Placeholder models — expand when persistence is added.
+model Case {
+  id        String   @id
+  name      String
+  type      String
+  location  String
+  notes     String
+  createdAt DateTime
+  data      String   // JSON blob of full CaseRecord for now
+}
