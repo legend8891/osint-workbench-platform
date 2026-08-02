@@ -19,7 +19,7 @@ app.get('/health', (_req, res) => {
   res.json({
     ok: true,
     service: 'osint-workbench-api',
-    version: '0.8.0',
+    version: '0.9.0',
     providers: providers.filter((p) => p.configured).map((p) => p.id),
     framework: {
       categories: true,
@@ -51,4 +51,6 @@ app.listen(PORT, () => {
   console.log(`  Health:     GET  /health`);
   console.log(`  Framework:  GET  /api/framework`);
   console.log(`  Sherlock:   POST /api/scan/sherlock`);
+  console.log(`  Email:      POST /api/scan/email`);
+  console.log(`  Domain/IP:  POST /api/scan/hunter|shodan|...`);
 });
