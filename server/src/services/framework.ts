@@ -146,14 +146,14 @@ export const FRAMEWORK_CATEGORIES: FrameworkCategory[] = [
 const PROVIDER_ENV: Record<string, { name: string; category: string; envKey: string; endpoint?: string }> = {
   sherlock: { name: 'Sherlock', category: 'username', envKey: '', endpoint: '/api/scan/sherlock' },
   hibp: { name: 'Have I Been Pwned', category: 'email', envKey: 'HIBP_API_KEY' },
-  hunterio: { name: 'Hunter.io', category: 'email', envKey: 'HUNTERIO_API_KEY' },
+  hunterio: { name: 'Hunter.io', category: 'email', envKey: 'HUNTER_API_KEY' },
   leakcheck: { name: 'LeakCheck', category: 'email', envKey: 'LEAKCHECK_API_KEY' },
   securitytrails: { name: 'SecurityTrails', category: 'domain', envKey: 'SECURITYTRAILS_API_KEY' },
   whoisxml: { name: 'WhoisXML', category: 'domain', envKey: 'WHOISXML_API_KEY' },
   urlscan: { name: 'urlscan.io', category: 'domain', envKey: 'URLSCAN_API_KEY' },
   virustotal: { name: 'VirusTotal', category: 'domain', envKey: 'VIRUSTOTAL_API_KEY' },
   shodan: { name: 'Shodan', category: 'ip', envKey: 'SHODAN_API_KEY' },
-  abuseipdb: { name: 'AbuseIPDB', category: 'ip', envKey: 'ABUSEPDB_API_KEY' },
+  abuseipdb: { name: 'AbuseIPDB', category: 'ip', envKey: 'ABUSEIPDB_API_KEY' },
   pulsedive: { name: 'Pulsedive', category: 'ip', envKey: 'PULSEDIVE_API_KEY' },
   serp: { name: 'SerpAPI', category: 'search', envKey: 'SERP_API_KEY' },
   google_cse: { name: 'Google Custom Search', category: 'search', envKey: 'CLOUD_CUSTOM_SEARCH_API' },
@@ -171,10 +171,19 @@ const PROVIDER_ENV: Record<string, { name: string; category: string; envKey: str
   openrouter: { name: 'OpenRouter', category: 'ai', envKey: 'OPENROUTER_API_KEY' },
 };
 
+const ENV_ALIASES: Record<string, string[]> = {
+  HUNTER_API_KEY: ['HUNTER_API_KEY', 'HUNTERIO_API_KEY'],
+  ABUSEIPDB_API_KEY: ['ABUSEIPDB_API_KEY', 'ABUSEPDB_API_KEY'],
+};
+
 function isConfigured(envKey: string): boolean {
   if (!envKey) return true;
-  const v = process.env[envKey];
-  return Boolean(v && v.trim() && v.trim() !== '-' && !v.trim().endsWith('_'));
+  const keys = ENV_ALIASES[envKey] || [envKey];
+  for (const k of keys) {
+    const v = process.env[k];
+    if (v && v.trim() && v.trim() !== '-' && !v.trim().endsWith('_')) return true;
+  }
+  return false;
 }
 
 export function getProviderStatuses(): ProviderStatus[] {
