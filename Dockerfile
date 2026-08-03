@@ -1,5 +1,5 @@
-# OSINT Workbench Platform — multi-stage production image
-FROM node:22-bookworm-slim AS deps
+# OSINT Workbench Platform — multi-stage production image (Node 20)
+FROM node:20-bookworm-slim AS deps
 WORKDIR /app
 COPY package.json package-lock.json* ./
 COPY shared/package.json shared/
@@ -14,7 +14,7 @@ RUN npm --workspace shared run build \
  && npm --workspace client run build \
  && npm --workspace server run build
 
-FROM node:22-bookworm-slim AS runner
+FROM node:20-bookworm-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=8787
