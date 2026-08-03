@@ -1,5 +1,6 @@
 import JSZip from 'jszip';
 import type { CaseRecord, CorrelationHit } from 'shared';
+import { escapeXml, escapeHtml } from './escape';
 
 function normalizeToken(raw: string): string {
   return raw.trim().toLowerCase().replace(/\s+/g, ' ');
@@ -36,23 +37,6 @@ export function downloadJson(data: unknown, filename: string) {
   link.download = filename;
   link.click();
   setTimeout(() => URL.revokeObjectURL(link.href), 1000);
-}
-
-function escapeXml(s: string): string {
-  return s
-    .replace(/&/g, '\x26amp;')
-    .replace(/</g, '\x26lt;')
-    .replace(/>/g, '\x26gt;')
-    .replace(/"/g, '\x26quot;')
-    .replace(/'/g, '\x26apos;');
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '\x26amp;')
-    .replace(/</g, '\x26lt;')
-    .replace(/>/g, '\x26gt;')
-    .replace(/"/g, '\x26quot;');
 }
 
 function sanitizeFilename(name: string): string {
@@ -133,7 +117,7 @@ export async function exportBundleZip(record: CaseRecord, correlationHits: Corre
 
 export function buildGraphML(
   record: CaseRecord,
-  correlationHits: CorrelationHit[] = []
+  _correlationHits: CorrelationHit[] = []
 ): string {
   const entityIds = new Set(record.entities.map((e) => e.id));
   const nodesXml = record.entities
