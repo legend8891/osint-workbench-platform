@@ -135,9 +135,6 @@ export async function exportBundleZip(record: CaseRecord, correlationHits: Corre
 /**
  * Build GraphML (XML) for entities + relationships.
  * Suitable for import into Maltego (tabular/GraphML workflows), yEd, Gephi, etc.
- * Confidence and identifiers are preserved as node/edge data attributes.
- * Correlation-only tokens that are not already entities are emitted as extra nodes
- * linked via a synthetic "correlates_with" edge when useful for Maltego pivoting.
  */
 export function buildGraphML(
   record: CaseRecord,
@@ -263,8 +260,6 @@ export function buildGraphML(
   xsi:schemaLocation="http://graphml.graphdrawing.org/xmlns http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd">
 ${keysXml}
   <graph id="${escapeXml(record.id)}" edgedefault="directed">
-    <!-- Case: ${escapeXml(record.name)} | location: ${escapeXml(record.location)} -->
-    <!-- All confidence values are source labels; verification=* is never auto-VERIFIED -->
 ${nodesXml}
 ${evidenceNodes}
 ${corrAnnotation}
@@ -363,10 +358,7 @@ export async function runSherlockScan(
   return res.json() as Promise<SherlockApiResponse>;
 }
 
-/**
- * Merge Sherlock results into a case. Preserves existing data;
- * appends new entities / evidence / provenance. Does not auto-promote confidence.
- */
+/** Merge Sherlock results into a case. */
 export function mergeScanIntoCase(
   record: CaseRecord,
   results: SherlockScanResult[]
@@ -484,12 +476,12 @@ export function launchFrameworkTool(tool: FrameworkTool, query: string) {
 export type ProviderLookupResult = {
   provider: string;
   query: string;
-  queryType: string;
-  configured: boolean;
+  queryType?: string;
+  configured?: boolean;
   ok: boolean;
   error?: string;
-  hits: { title: string; url: string; detail: string; tags: string[] }[];
-  rawSummary: string;
+  hits: Array<string | { title: string; url: string; detail?: string; tags?: string[] }>;
+  rawSummary?: string;
   entities: import('shared').EntityRecord[];
   evidence: import('shared').EvidenceRecord[];
   provenance: import('shared').ProvenanceStep[];
