@@ -12,6 +12,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { throttledFetchJson } from './throttle.js';
 
 export type Confidence = 'High' | 'Medium' | 'Low' | 'Unverified';
 
@@ -105,27 +106,6 @@ function emptyResult(
   };
 }
 
-async function fetchJson(
-  url: string,
-  init?: RequestInit
-): Promise<{ ok: boolean; status: number; data: unknown; text: string }> {
-  const res = await fetch(url, {
-    ...init,
-    headers: {
-      Accept: 'application/json',
-      ...(init?.headers || {}),
-    },
-  });
-  const text = await res.text();
-  let data: unknown = null;
-  try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    data = { raw: text.slice(0, 800) };
-  }
-  return { ok: res.ok, status: res.status, data, text };
-}
-
 function makeEntity(
   name: string,
   type: string,
@@ -176,7 +156,7 @@ export async function lookupHibp(email: string): Promise<ProviderLookupResult> {
   const queryType = 'email';
   if (!key) return emptyResult(provider, email, queryType, 'HIBP_API_KEY not configured');
   const url = `https://haveibeenpwned.com/api/v3/breachedaccount/${encodeURIComponent(email)}?truncateResponse=false`;
-  const { ok, status, data } = await fetchJson(url, {
+  const { ok, status, data } = await throttledFetchJson('hibp', url, {
     headers: { 'hibp-api-key': key, 'user-agent': 'osint-workbench-platform' },
   });
   if (status === 404) {
@@ -190,6 +170,9 @@ export async function lookupHibp(email: string): Promise<ProviderLookupResult> {
   }
   if (status === 401 || status === 403) {
     return emptyResult(provider, email, queryType, `HIBP auth failed (HTTP ${status}) — check HIBP_API_KEY`, true);
+  }
+  if (status === 429) {
+    return emptyResult(provider, email, queryType, 'HIBP rate limited — wait and retry', true);
   }
   if (!ok || !Array.isArray(data)) {
     return emptyResult(provider, email, queryType, `HIBP HTTP ${status}`, true);
@@ -215,8 +198,9 @@ export async function lookupHunterEmail(email: string): Promise<ProviderLookupRe
   const queryType = 'email';
   if (!key) return emptyResult(provider, email, queryType, 'HUNTER_API_KEY / HUNTERIO_API_KEY not configured');
   const url = `https://api.hunter.io/v2/email-verifier?email=${encodeURIComponent(email)}&api_key=${encodeURIComponent(key)}`;
-  const { ok, status, data } = await fetchJson(url);
+  const { ok, status, data } = await throttledFetchJson('hunter', url);
   if (status === 401) return emptyResult(provider, email, queryType, 'Hunter auth failed — check API key', true);
+  if (status === 429) return emptyResult(provider, email, queryType, 'Hunter rate limited — wait and retry', true);
   if (!ok || !data || typeof data !== 'object') {
     return emptyResult(provider, email, queryType, `Hunter email verifier failed (HTTP ${status})`, true);
   }
@@ -251,8 +235,9 @@ export async function lookupHunterDomain(domain: string): Promise<ProviderLookup
   const queryType = 'domain';
   if (!key) return emptyResult(provider, domain, queryType, 'HUNTER_API_KEY / HUNTERIO_API_KEY not configured');
   const url = `https://api.hunter.io/v2/domain-search?domain=${encodeURIComponent(domain)}&api_key=${encodeURIComponent(key)}&limit=20`;
-  const { ok, status, data } = await fetchJson(url);
+  const { ok, status, data } = await throttledFetchJson('hunter', url);
   if (status === 401) return emptyResult(provider, domain, queryType, 'Hunter auth failed — check API key', true);
+  if (status === 429) return emptyResult(provider, domain, queryType, 'Hunter rate limited — wait and retry', true);
   if (!ok || !data || typeof data !== 'object') {
     return emptyResult(provider, domain, queryType, `Hunter domain search failed (HTTP ${status})`, true);
   }
@@ -289,7 +274,8 @@ export async function lookupNumverify(phone: string): Promise<ProviderLookupResu
   const queryType = 'phone';
   if (!key) return emptyResult(provider, phone, queryType, 'NUMVERIFY_API_KEY not configured');
   const url = `https://apilayer.net/api/validate?access_key=${encodeURIComponent(key)}&number=${encodeURIComponent(phone)}`;
-  const { ok, status, data } = await fetchJson(url);
+  const { ok, status, data } = await throttledFetchJson('numverify', url);
+  if (status === 429) return emptyResult(provider, phone, queryType, 'Numverify rate limited — wait and retry', true);
   if (!ok || !data || typeof data !== 'object') {
     return emptyResult(provider, phone, queryType, `Numverify failed (HTTP ${status})`, true);
   }
@@ -325,10 +311,11 @@ export async function lookupAbuseIp(ip: string): Promise<ProviderLookupResult> {
   const queryType = 'ip';
   if (!key) return emptyResult(provider, ip, queryType, 'ABUSEIPDB_API_KEY / ABUSEPDB_API_KEY not configured');
   const url = `https://api.abuseipdb.com/api/v2/check?ipAddress=${encodeURIComponent(ip)}&maxAgeInDays=90&verbose`;
-  const { ok, status, data } = await fetchJson(url, { headers: { Key: key, Accept: 'application/json' } });
+  const { ok, status, data } = await throttledFetchJson('abuseipdb', url, { headers: { Key: key, Accept: 'application/json' } });
   if (status === 401 || status === 403) {
     return emptyResult(provider, ip, queryType, `AbuseIPDB auth failed (HTTP ${status})`, true);
   }
+  if (status === 429) return emptyResult(provider, ip, queryType, 'AbuseIPDB rate limited — wait and retry', true);
   if (!ok || !data || typeof data !== 'object') {
     return emptyResult(provider, ip, queryType, `AbuseIPDB failed (HTTP ${status})`, true);
   }
@@ -361,8 +348,9 @@ export async function lookupShodan(ip: string): Promise<ProviderLookupResult> {
   const queryType = 'ip';
   if (!key) return emptyResult(provider, ip, queryType, 'SHODAN_API_KEY not configured');
   const url = `https://api.shodan.io/shodan/host/${encodeURIComponent(ip)}?key=${encodeURIComponent(key)}`;
-  const { ok, status, data } = await fetchJson(url);
+  const { ok, status, data } = await throttledFetchJson('shodan', url);
   if (status === 401) return emptyResult(provider, ip, queryType, 'Shodan auth failed — check SHODAN_API_KEY', true);
+  if (status === 429) return emptyResult(provider, ip, queryType, 'Shodan rate limited — wait and retry', true);
   if (status === 404) {
     return {
       provider, query: ip, queryType, configured: true, ok: true, hits: [],
@@ -401,10 +389,11 @@ export async function lookupVirusTotalDomain(domain: string): Promise<ProviderLo
   const queryType = 'domain';
   if (!key) return emptyResult(provider, domain, queryType, 'VIRUSTOTAL_API_KEY not configured');
   const url = `https://www.virustotal.com/api/v3/domains/${encodeURIComponent(domain)}`;
-  const { ok, status, data } = await fetchJson(url, { headers: { 'x-apikey': key } });
+  const { ok, status, data } = await throttledFetchJson('virustotal', url, { headers: { 'x-apikey': key } });
   if (status === 401 || status === 403) {
     return emptyResult(provider, domain, queryType, `VirusTotal auth failed (HTTP ${status})`, true);
   }
+  if (status === 429) return emptyResult(provider, domain, queryType, 'VirusTotal rate limited — wait and retry', true);
   if (!ok || !data || typeof data !== 'object') {
     return emptyResult(provider, domain, queryType, `VirusTotal domain failed (HTTP ${status})`, true);
   }
