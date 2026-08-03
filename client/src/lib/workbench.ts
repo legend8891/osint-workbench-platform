@@ -172,7 +172,6 @@ export function buildGraphML(
 
   const nodesXml = record.entities
     .map((e) => {
-      // Never auto-VERIFIED: map confidence to explicit verification label
       const verification =
         e.confidence === 'High' ? 'POSSIBLE_HIGH' : `POSSIBLE_${e.confidence.toUpperCase()}`;
       return `    <node id="${escapeXml(e.id)}">
@@ -186,7 +185,6 @@ export function buildGraphML(
     })
     .join('\n');
 
-  // Evidence as optional URL nodes (linked to first related entity)
   const evidenceNodes = record.evidence
     .map((ev) => {
       const id = `evidence-${ev.id}`;
@@ -227,7 +225,6 @@ export function buildGraphML(
     .filter(Boolean)
     .join('\n');
 
-  // Optional: surface cross-case correlation tokens as annotation nodes
   const corrAnnotation = correlationHits
     .filter((h) => h.matches.some((m) => m.caseId === record.id))
     .map((h, idx) => {
@@ -294,11 +291,11 @@ export function exportGraphML(
 
 function escapeXml(s: string): string {
   return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
+    .replace(/&/g, '&')
+    .replace(/</g, '<')
+    .replace(/>/g, '>')
+    .replace(/"/g, '"')
+    .replace(/'/g, ''');
 }
 
 function sanitizeFilename(name: string): string {
@@ -307,10 +304,10 @@ function sanitizeFilename(name: string): string {
 
 function escapeHtml(s: string): string {
   return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/&/g, '&')
+    .replace(/</g, '<')
+    .replace(/>/g, '>')
+    .replace(/"/g, '"');
 }
 
 // ---------------------------------------------------------------------------
@@ -386,7 +383,6 @@ export function mergeScanIntoCase(
 
   for (const result of results) {
     for (const entity of result.entities) {
-      // avoid exact id collision; keep if same name already present
       if (!next.entities.some((e) => e.id === entity.id)) {
         next.entities.push(entity);
       }
@@ -475,9 +471,111 @@ export function launchFrameworkTool(tool: FrameworkTool, query: string) {
     url = tool.urlTemplate.replace(/\{q\}/g, q);
   }
   if (url.startsWith('/')) {
-    // in-app API — caller should use provider action instead
     return url;
   }
   window.open(url, '_blank', 'noopener,noreferrer');
   return url;
+}
+
+// ---------------------------------------------------------------------------
+// Live provider lookups (server uses API keys from env)
+// ---------------------------------------------------------------------------
+
+export type ProviderLookupResult = {
+  provider: string;
+  query: string;
+  queryType: string;
+  configured: boolean;
+  ok: boolean;
+  error?: string;
+  hits: { title: string; url: string; detail: string; tags: string[] }[];
+  rawSummary: string;
+  entities: import('shared').EntityRecord[];
+  evidence: import('shared').EvidenceRecord[];
+  provenance: import('shared').ProvenanceStep[];
+};
+
+async function postJson<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(
+      (data as { message?: string }).message ||
+        (data as { error?: string }).error ||
+        `Request failed (${res.status})`
+    );
+  }
+  return data as T;
+}
+
+export function lookupEmailBundle(email: string) {
+  return postJson<{ query: string; scannedAt: string; results: ProviderLookupResult[] }>(
+    '/api/scan/email',
+    { email }
+  );
+}
+
+export function lookupHunterDomain(domain: string) {
+  return postJson<ProviderLookupResult>('/api/scan/hunter/domain', { domain });
+}
+
+export function lookupVirusTotalDomain(domain: string) {
+  return postJson<ProviderLookupResult>('/api/scan/virustotal/domain', { domain });
+}
+
+export function lookupShodan(ip: string) {
+  return postJson<ProviderLookupResult>('/api/scan/shodan', { ip });
+}
+
+export function lookupAbuseIp(ip: string) {
+  return postJson<ProviderLookupResult>('/api/scan/abuseipdb', { ip });
+}
+
+export function lookupNumverify(phone: string) {
+  return postJson<ProviderLookupResult>('/api/scan/numverify', { phone });
+}
+
+/** Merge any provider lookup result into a case (live data only). */
+export function mergeProviderIntoCase(
+  record: CaseRecord,
+  results: ProviderLookupResult[]
+): CaseRecord {
+  const next: CaseRecord = {
+    ...record,
+    entities: [...record.entities],
+    evidence: [...record.evidence],
+    provenance: [...record.provenance],
+    events: [...record.events],
+  };
+  const now = new Date().toISOString().slice(0, 10);
+  for (const result of results) {
+    if (!result.ok) continue;
+    for (const entity of result.entities) {
+      if (!next.entities.some((e) => e.id === entity.id)) next.entities.push(entity);
+    }
+    for (const ev of result.evidence) {
+      if (!next.evidence.some((e) => e.id === ev.id)) next.evidence.push(ev);
+    }
+    for (const p of result.provenance) {
+      if (!next.provenance.some((x) => x.id === p.id)) next.provenance.push(p);
+    }
+    if (result.hits.length > 0) {
+      next.events.push({
+        id: `event-${result.provider}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        entityId: result.entities[0]?.id ?? '',
+        date: now,
+        title: `${result.provider}: ${result.query} (${result.hits.length} hit(s))`,
+        notes: result.rawSummary || result.error || '',
+      });
+    }
+  }
+  next.report = {
+    summary: `${next.entities.length} entities, ${next.evidence.length} evidence items from live lookups.`,
+    next: 'Corroborate POSSIBLE findings with independent sources before treating as verified.',
+  };
+  return next;
 }
