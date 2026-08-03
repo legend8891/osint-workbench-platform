@@ -7,19 +7,27 @@ import { sampleApiCaseResponse } from './routes/sample.js';
 import { scanRouter } from './routes/scan.js';
 import { frameworkRouter } from './routes/framework.js';
 import { getProviderStatuses } from './services/framework.js';
+import { rateLimitMiddleware } from './middleware/rateLimit.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 
+app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+app.use(rateLimitMiddleware);
 
 app.get('/health', (_req, res) => {
   const providers = getProviderStatuses();
   res.json({
     ok: true,
     service: 'osint-workbench-api',
-    version: '0.9.0',
+    version: '0.10.0',
+    rateLimit: {
+      windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS) || 60_000,
+      maxApi: Number(process.env.RATE_LIMIT_MAX) || 30,
+      maxScan: Number(process.env.RATE_LIMIT_SCAN_MAX) || 12,
+    },
     providers: providers.filter((p) => p.configured).map((p) => p.id),
     framework: {
       categories: true,
@@ -53,4 +61,7 @@ app.listen(PORT, () => {
   console.log(`  Sherlock:   POST /api/scan/sherlock`);
   console.log(`  Email:      POST /api/scan/email`);
   console.log(`  Domain/IP:  POST /api/scan/hunter|shodan|...`);
+  console.log(
+    `  Rate limit: ${Number(process.env.RATE_LIMIT_SCAN_MAX) || 12}/min scan, ${Number(process.env.RATE_LIMIT_MAX) || 30}/min other API`
+  );
 });
