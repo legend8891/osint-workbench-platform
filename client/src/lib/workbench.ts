@@ -215,6 +215,14 @@ export async function runSherlockScan(usernames: string[]): Promise<SherlockApiR
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
+    if (res.status === 429) {
+      const retry = (body as { retryAfterSec?: number }).retryAfterSec
+        ?? Number(res.headers.get('Retry-After') || 60);
+      throw new Error(
+        (body as { message?: string }).message ||
+          `Rate limited — wait ${retry}s and try again`
+      );
+    }
     throw new Error(
       (body as { message?: string }).message ||
         (body as { error?: string }).error ||
@@ -337,6 +345,15 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
+    if (res.status === 429) {
+      const retry =
+        (data as { retryAfterSec?: number }).retryAfterSec ??
+        Number(res.headers.get('Retry-After') || 60);
+      throw new Error(
+        (data as { message?: string }).message ||
+          `Rate limited — wait ${retry}s and try again`
+      );
+    }
     throw new Error(
       (data as { message?: string }).message ||
         (data as { error?: string }).error ||
