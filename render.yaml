@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: osint-workbench-platform
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "20.19.0"
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "10000"
+      # Set these in the Render dashboard (do not commit secrets):
+      # HIBP_API_KEY, HUNTER_API_KEY, SHODAN_API_KEY, VIRUSTOTAL_API_KEY,
+      # ABUSEIPDB_API_KEY, NUMVERIFY_API_KEY
