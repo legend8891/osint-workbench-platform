@@ -17,18 +17,36 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(rateLimitMiddleware);
 
+const LIVE_PROVIDER_IDS = new Set([
+  'hibp',
+  'hunterio',
+  'shodan',
+  'virustotal',
+  'abuseipdb',
+  'numverify',
+  'sherlock',
+]);
+
 app.get('/health', (_req, res) => {
   const providers = getProviderStatuses();
+  const live = providers.filter((p) => LIVE_PROVIDER_IDS.has(p.id));
   res.json({
     ok: true,
     service: 'osint-workbench-api',
-    version: '0.10.0',
+    version: '0.10.1',
     rateLimit: {
       windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS) || 60_000,
       maxApi: Number(process.env.RATE_LIMIT_MAX) || 30,
       maxScan: Number(process.env.RATE_LIMIT_SCAN_MAX) || 12,
     },
-    providers: providers.filter((p) => p.configured).map((p) => p.id),
+    /** Live in-app providers only — values never returned, only configured flags */
+    keys: live.map((p) => ({
+      id: p.id,
+      envKey: p.envKey,
+      configured: p.configured,
+    })),
+    providersConfigured: live.filter((p) => p.configured).map((p) => p.id),
+    providersMissing: live.filter((p) => !p.configured && p.envKey !== '(none)').map((p) => p.id),
     framework: {
       categories: true,
       path: '/api/framework',
