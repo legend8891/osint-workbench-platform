@@ -10,6 +10,7 @@ import {
   lookupShodan,
   lookupVirusTotalDomain,
 } from '../services/providers.js';
+import { runSpiderfootScan } from '../services/spiderfoot.js';
 
 export const scanRouter = Router();
 
@@ -184,6 +185,27 @@ scanRouter.post('/email', async (req, res) => {
   } catch (err) {
     res.status(500).json({
       error: 'Email lookup failed',
+      message: err instanceof Error ? err.message : 'Unknown error',
+    });
+  }
+});
+
+const spiderfootSchema = z.object({
+  target: z.string().min(1).max(256),
+});
+
+scanRouter.post('/spiderfoot', async (req, res) => {
+  const parsed = spiderfootSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid body', details: parsed.error.flatten() });
+    return;
+  }
+  try {
+    const result = await runSpiderfootScan(parsed.data.target);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({
+      error: 'SpiderFoot scan failed',
       message: err instanceof Error ? err.message : 'Unknown error',
     });
   }

@@ -33,13 +33,12 @@ app.get('/health', (_req, res) => {
   res.json({
     ok: true,
     service: 'osint-workbench-api',
-    version: '0.10.1',
+    version: '0.10.2',
     rateLimit: {
       windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS) || 60_000,
       maxApi: Number(process.env.RATE_LIMIT_MAX) || 30,
       maxScan: Number(process.env.RATE_LIMIT_SCAN_MAX) || 12,
     },
-    /** Live in-app providers only — values never returned, only configured flags */
     keys: live.map((p) => ({
       id: p.id,
       envKey: p.envKey,
@@ -50,6 +49,10 @@ app.get('/health', (_req, res) => {
     framework: {
       categories: true,
       path: '/api/framework',
+    },
+    spiderfoot: {
+      path: '/api/scan/spiderfoot',
+      note: 'Requires SpiderFoot CLI on host (SPIDERFOOT_BIN). Not available on typical free Render.',
     },
   });
 });
@@ -77,6 +80,7 @@ app.listen(PORT, () => {
   console.log(`  Health:     GET  /health`);
   console.log(`  Framework:  GET  /api/framework`);
   console.log(`  Sherlock:   POST /api/scan/sherlock`);
+  console.log(`  SpiderFoot: POST /api/scan/spiderfoot`);
   console.log(`  Email:      POST /api/scan/email`);
   console.log(`  Domain/IP:  POST /api/scan/hunter|shodan|...`);
   console.log(
