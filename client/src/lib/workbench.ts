@@ -390,6 +390,13 @@ export function lookupNumverify(phone: string) {
   return postJson<ProviderLookupResult>('/api/scan/numverify', { phone });
 }
 
+export function lookupSpiderfoot(target: string) {
+  return postJson<ProviderLookupResult & { mode?: string; eventCount?: number; modules?: string[] }>(
+    '/api/scan/spiderfoot',
+    { target }
+  );
+}
+
 export function mergeProviderIntoCase(
   record: CaseRecord,
   results: ProviderLookupResult[]
