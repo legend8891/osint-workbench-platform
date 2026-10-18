@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   CaseRecord,
   CorrelationHit,
@@ -22,10 +22,27 @@ import {
   lookupShodan,
   lookupAbuseIp,
   lookupNumverify,
+  lookupSpiderfoot,
+  lookupFreeRecon,
   mergeProviderIntoCase,
+  loadCases,
+  saveCases,
+  renameCase,
+  deleteCase,
+  promoteEntityConfidence,
+  verifyEntity,
+  unverifyEntity,
+  removeEntity,
+  promoteEvidenceConfidence,
+  verifyEvidence,
+  unverifyEvidence,
+  removeEvidence,
+  addRelationship,
+  removeRelationship,
   type SherlockScanResult,
   type FrameworkCatalog,
   type ProviderLookupResult,
+  type FreeReconResponse,
 } from '../lib/workbench';
 
 const tabs = [
@@ -40,11 +57,48 @@ const tabs = [
 ] as const;
 type Tab = (typeof tabs)[number];
 
+type HealthInfo = {
+  ok: boolean;
+  version: string;
+  providersConfigured: string[];
+  providersMissing: string[];
+  freeProviders: string[];
+};
+
+const CONFIDENCE_CLASS: Record<string, string> = {
+  High: 'badge badge-high',
+  Medium: 'badge badge-medium',
+  Low: 'badge badge-low',
+  Unverified: 'badge badge-unverified',
+};
+
+function ConfidenceBadge({ value, verified }: { value: string; verified?: boolean }) {
+  return (
+    <span className={CONFIDENCE_CLASS[value] ?? 'badge'}>
+      {value}
+      {verified ? ' ✓' : ''}
+    </span>
+  );
+}
+
+const inputStyle = {
+  flex: 1,
+  minHeight: 44,
+  padding: '0.75rem 1rem',
+  borderRadius: 999,
+  border: '1px solid rgba(0,0,0,.15)',
+} as const;
+
 export function App() {
   const [activeTab, setActiveTab] = useState<Tab>('cases');
-  const [cases, setCases] = useState<CaseRecord[]>(sampleCases);
+  const [cases, setCases] = useState<CaseRecord[]>(() => {
+    const stored = loadCases();
+    return stored.length > 0 ? stored : sampleCases;
+  });
   const [activeCaseId, setActiveCaseId] = useState<string>('');
   const [correlationHits, setCorrelationHits] = useState<CorrelationHit[]>([]);
+  const [health, setHealth] = useState<HealthInfo | null>(null);
+
   const [sherlockInput, setSherlockInput] = useState('');
   const [sherlockBusy, setSherlockBusy] = useState(false);
   const [sherlockLog, setSherlockLog] = useState<string[]>([]);
@@ -62,6 +116,25 @@ export function App() {
   const [lookupLog, setLookupLog] = useState<string[]>([]);
   const [lastProviders, setLastProviders] = useState<ProviderLookupResult[]>([]);
 
+  // Free recon (no API key)
+  const [freeTarget, setFreeTarget] = useState('');
+  const [freeBusy, setFreeBusy] = useState(false);
+  const [freeLog, setFreeLog] = useState<string[]>([]);
+  const [lastFree, setLastFree] = useState<FreeReconResponse | null>(null);
+
+  // SpiderFoot CLI
+  const [sfTarget, setSfTarget] = useState('');
+  const [sfBusy, setSfBusy] = useState(false);
+  const [sfLog, setSfLog] = useState<string[]>([]);
+
+  // Case management + relationship editor
+  const [renameValue, setRenameValue] = useState('');
+  const [relSource, setRelSource] = useState('');
+  const [relTarget, setRelTarget] = useState('');
+  const [relType, setRelType] = useState('');
+
+  const hydrated = useRef(false);
+
   const activeCase = useMemo(
     () => cases.find((c) => c.id === activeCaseId) ?? null,
     [cases, activeCaseId]
@@ -72,8 +145,41 @@ export function App() {
       (count, c) => count + c.evidence.reduce((n, e) => n + e.attachments.length, 0),
       0
     );
-    return { cases: cases.length, correlations: correlationHits.length, attachments };
+    const verified =
+      cases.reduce(
+        (n, c) => n + c.entities.filter((e) => e.verified).length + c.evidence.filter((e) => e.verified).length,
+        0
+      );
+    return { cases: cases.length, correlations: correlationHits.length, attachments, verified };
   }, [cases, correlationHits]);
+
+  /* Persistence: hydrate once, then persist on every change. */
+  useEffect(() => {
+    if (!hydrated.current) {
+      hydrated.current = true;
+      return;
+    }
+    saveCases(cases);
+  }, [cases]);
+
+  useEffect(() => {
+    if (!activeCaseId && cases.length > 0) setActiveCaseId(cases[0].id);
+  }, [activeCaseId, cases]);
+
+  useEffect(() => {
+    setCorrelationHits(buildCorrelationHits(cases));
+  }, [cases]);
+
+  useEffect(() => {
+    fetch('/health')
+      .then((r) => r.json())
+      .then((d) => setHealth(d as HealthInfo))
+      .catch(() => setHealth(null));
+  }, []);
+
+  useEffect(() => {
+    if (activeCase) setRenameValue(activeCase.name);
+  }, [activeCaseId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function ensureCase(): CaseRecord {
     if (activeCase) return activeCase;
@@ -83,11 +189,7 @@ export function App() {
   function updateCase(next: CaseRecord) {
     setCases((prev) => {
       const exists = prev.some((c) => c.id === next.id);
-      const updated = exists
-        ? prev.map((c) => (c.id === next.id ? next : c))
-        : [...prev, next];
-      setCorrelationHits(buildCorrelationHits(updated));
-      return updated;
+      return exists ? prev.map((c) => (c.id === next.id ? next : c)) : [...prev, next];
     });
     setActiveCaseId(next.id);
   }
@@ -97,6 +199,17 @@ export function App() {
     setCases((prev) => [...prev, created]);
     setActiveCaseId(created.id);
     setActiveTab('lookup');
+  }
+
+  function handleDeleteCase(id: string) {
+    const next = deleteCase(cases, id);
+    setCases(next);
+    if (activeCaseId === id) setActiveCaseId(next[0]?.id ?? '');
+  }
+
+  function handleRenameCase() {
+    if (!activeCase) return;
+    setCases(renameCase(cases, activeCase.id, renameValue));
   }
 
   async function loadFramework() {
@@ -140,6 +253,64 @@ export function App() {
       ]);
     } finally {
       setSherlockBusy(false);
+    }
+  }
+
+  async function runFreeLookup() {
+    const target = freeTarget.trim();
+    if (!target) {
+      setFreeLog(['Enter a domain, IP, email, or URL']);
+      return;
+    }
+    const base = ensureCase();
+    setFreeBusy(true);
+    setFreeLog([`Free recon on ${target}…`]);
+    try {
+      const bundle = await lookupFreeRecon(target);
+      setLastFree(bundle);
+      updateCase(mergeProviderIntoCase(base, bundle.results));
+      setFreeLog([
+        `Detected target type: ${bundle.queryType}`,
+        ...bundle.results.map((r) =>
+          r.ok
+            ? `${r.provider}: ${r.rawSummary || `${r.hits.length} hit(s)`} · entities=${r.entities.length} evidence=${r.evidence.length}`
+            : `${r.provider} FAILED: ${r.error || 'unknown error'}`
+        ),
+        'Merged into case — open Entities / Evidence tabs.',
+      ]);
+    } catch (err) {
+      setFreeLog([err instanceof Error ? err.message : 'Free recon failed']);
+    } finally {
+      setFreeBusy(false);
+    }
+  }
+
+  async function runSpiderfoot() {
+    const target = sfTarget.trim();
+    if (!target) {
+      setSfLog(['Enter a target (domain, IP, or email)']);
+      return;
+    }
+    const base = ensureCase();
+    setSfBusy(true);
+    setSfLog([`SpiderFoot scan on ${target}…`]);
+    try {
+      const result = await lookupSpiderfoot(target);
+      updateCase(mergeProviderIntoCase(base, [result]));
+      setSfLog(
+        [
+          result.ok
+            ? `${result.provider}: ${result.rawSummary || `${result.hits.length} hit(s)`}`
+            : `${result.provider}: ${result.error || 'failed'}`,
+          result.mode ? `Mode: ${result.mode}` : '',
+          typeof result.eventCount === 'number' ? `Events: ${result.eventCount}` : '',
+          'Merged into case — open Entities / Evidence tabs.',
+        ].filter(Boolean)
+      );
+    } catch (err) {
+      setSfLog([err instanceof Error ? err.message : 'SpiderFoot failed']);
+    } finally {
+      setSfBusy(false);
     }
   }
 
@@ -264,10 +435,25 @@ export function App() {
           <div className="eyebrow">OSINT Workbench Platform</div>
           <h1>Live lookups only — no sample profiles</h1>
           <p>
-            Results come from configured APIs (HIBP, Hunter, Shodan, VirusTotal, AbuseIPDB,
-            Numverify, Sherlock). Nothing is invented. All findings stay POSSIBLE until you
-            verify them.
+            Free no-key recon works out of the box (DNS, RDAP WHOIS, CT logs, host search, IP
+            geo, Gravatar, Wayback). Paid providers (HIBP, Hunter, Shodan, VirusTotal, AbuseIPDB,
+            Numverify) activate when their keys are set. Nothing is invented — every finding stays
+            POSSIBLE until you verify it.
           </p>
+          {health && (
+            <div className="provider-status">
+              <span className="chip chip-ok">v{health.version}</span>
+              <span className="chip chip-free">
+                {health.freeProviders?.length ?? 0} free providers
+              </span>
+              <span className="chip chip-ok">
+                {(health.providersConfigured?.length ?? 0)} keyed
+              </span>
+              <span className="chip chip-muted">
+                {(health.providersMissing?.length ?? 0)} missing keys
+              </span>
+            </div>
+          )}
         </div>
         <div className="stats">
           <div>
@@ -279,10 +465,8 @@ export function App() {
             <strong>{stats.correlations}</strong>
           </div>
           <div>
-            <span>Evidence items</span>
-            <strong>
-              {cases.reduce((n, c) => n + c.evidence.length, 0)}
-            </strong>
+            <span>Verified findings</span>
+            <strong>{stats.verified}</strong>
           </div>
         </div>
       </header>
@@ -315,22 +499,63 @@ export function App() {
             )}
             <div className="cards">
               {cases.map((record) => (
-                <button
+                <article
                   key={record.id}
-                  className="card selectable"
-                  onClick={() => {
-                    setActiveCaseId(record.id);
-                    setActiveTab('lookup');
-                  }}
+                  className={`card${record.id === activeCaseId ? ' selected' : ''}`}
                 >
-                  <strong>{record.name}</strong>
-                  <span>{record.type}</span>
-                  <small>
-                    {record.entities.length} entities · {record.evidence.length} evidence
-                  </small>
-                </button>
+                  <button
+                    className="card-head"
+                    onClick={() => {
+                      setActiveCaseId(record.id);
+                      setActiveTab('lookup');
+                    }}
+                  >
+                    <strong>{record.name}</strong>
+                    <span>{record.type}</span>
+                    <small>
+                      {record.entities.length} entities · {record.evidence.length} evidence ·{' '}
+                      {record.entities.filter((e) => e.verified).length +
+                        record.evidence.filter((e) => e.verified).length}{' '}
+                      verified
+                    </small>
+                  </button>
+                  <div className="actions-row">
+                    <button
+                      className="action ghost small"
+                      onClick={() => {
+                        setActiveCaseId(record.id);
+                        setActiveTab('lookup');
+                      }}
+                    >
+                      Open
+                    </button>
+                    <button
+                      className="action danger small"
+                      onClick={() => handleDeleteCase(record.id)}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </article>
               ))}
             </div>
+
+            {activeCase && (
+              <article className="line-item" style={{ marginTop: '1rem' }}>
+                <strong>Case settings — {activeCase.name}</strong>
+                <div className="actions-row" style={{ marginTop: '0.5rem' }}>
+                  <input
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    placeholder="Rename case"
+                    style={inputStyle}
+                  />
+                  <button className="action" onClick={handleRenameCase}>
+                    Save name
+                  </button>
+                </div>
+              </article>
+            )}
           </section>
         )}
 
@@ -338,9 +563,30 @@ export function App() {
           <section className="panel full">
             <h2>Live lookup</h2>
             <p className="muted">
-              Requires API keys on the server (Render Environment). Missing keys return an
-              explicit error — never fake data.
+              Free recon needs no keys. Paid providers require server environment keys — missing
+              keys return an explicit error, never fake data.
             </p>
+
+            <article className="line-item highlight">
+              <strong>Free recon (no API key) — auto-detect</strong>
+              <p className="muted">
+                Enter a domain, IP, email, or URL. Runs DNS (DoH), RDAP WHOIS, certificate
+                transparency, host search, IP geolocation, Gravatar, and the Wayback Machine as
+                applicable.
+              </p>
+              <div className="actions-row" style={{ marginTop: '0.5rem' }}>
+                <input
+                  value={freeTarget}
+                  onChange={(e) => setFreeTarget(e.target.value)}
+                  placeholder="example.com · 1.2.3.4 · name@example.com"
+                  style={inputStyle}
+                  disabled={freeBusy}
+                />
+                <button className="action" onClick={runFreeLookup} disabled={freeBusy}>
+                  {freeBusy ? 'Running…' : 'Run free recon'}
+                </button>
+              </div>
+            </article>
 
             <article className="line-item">
               <strong>Email (HIBP + Hunter)</strong>
@@ -349,13 +595,7 @@ export function App() {
                   value={lookupEmail}
                   onChange={(e) => setLookupEmail(e.target.value)}
                   placeholder="name@example.com"
-                  style={{
-                    flex: 1,
-                    minHeight: 44,
-                    padding: '0.75rem 1rem',
-                    borderRadius: 999,
-                    border: '1px solid rgba(0,0,0,.15)',
-                  }}
+                  style={inputStyle}
                   disabled={lookupBusy}
                 />
                 <button className="action" onClick={runEmailLookup} disabled={lookupBusy}>
@@ -371,13 +611,7 @@ export function App() {
                   value={sherlockInput}
                   onChange={(e) => setSherlockInput(e.target.value)}
                   placeholder="username"
-                  style={{
-                    flex: 1,
-                    minHeight: 44,
-                    padding: '0.75rem 1rem',
-                    borderRadius: 999,
-                    border: '1px solid rgba(0,0,0,.15)',
-                  }}
+                  style={inputStyle}
                   disabled={sherlockBusy}
                 />
                 <button className="action" onClick={handleSherlockScan} disabled={sherlockBusy}>
@@ -393,13 +627,7 @@ export function App() {
                   value={lookupDomain}
                   onChange={(e) => setLookupDomain(e.target.value)}
                   placeholder="example.com"
-                  style={{
-                    flex: 1,
-                    minHeight: 44,
-                    padding: '0.75rem 1rem',
-                    borderRadius: 999,
-                    border: '1px solid rgba(0,0,0,.15)',
-                  }}
+                  style={inputStyle}
                   disabled={lookupBusy}
                 />
                 <button className="action" onClick={runDomainLookup} disabled={lookupBusy}>
@@ -415,13 +643,7 @@ export function App() {
                   value={lookupIp}
                   onChange={(e) => setLookupIp(e.target.value)}
                   placeholder="1.2.3.4"
-                  style={{
-                    flex: 1,
-                    minHeight: 44,
-                    padding: '0.75rem 1rem',
-                    borderRadius: 999,
-                    border: '1px solid rgba(0,0,0,.15)',
-                  }}
+                  style={inputStyle}
                   disabled={lookupBusy}
                 />
                 <button className="action" onClick={runIpLookup} disabled={lookupBusy}>
@@ -437,13 +659,7 @@ export function App() {
                   value={lookupPhone}
                   onChange={(e) => setLookupPhone(e.target.value)}
                   placeholder="+61412345678"
-                  style={{
-                    flex: 1,
-                    minHeight: 44,
-                    padding: '0.75rem 1rem',
-                    borderRadius: 999,
-                    border: '1px solid rgba(0,0,0,.15)',
-                  }}
+                  style={inputStyle}
                   disabled={lookupBusy}
                 />
                 <button className="action" onClick={runPhoneLookup} disabled={lookupBusy}>
@@ -452,12 +668,83 @@ export function App() {
               </div>
             </article>
 
+            <article className="line-item">
+              <strong>SpiderFoot (host CLI — optional)</strong>
+              <p className="muted">
+                Deep scan via a SpiderFoot CLI on the host (SPIDERFOOT_BIN). Not available on
+                typical free hosting.
+              </p>
+              <div className="actions-row" style={{ marginTop: '0.5rem' }}>
+                <input
+                  value={sfTarget}
+                  onChange={(e) => setSfTarget(e.target.value)}
+                  placeholder="example.com"
+                  style={inputStyle}
+                  disabled={sfBusy}
+                />
+                <button className="action" onClick={runSpiderfoot} disabled={sfBusy}>
+                  {sfBusy ? 'Scanning…' : 'Run SpiderFoot'}
+                </button>
+              </div>
+            </article>
+
+            {freeLog.length > 0 && (
+              <div className="log">
+                <strong>Free recon</strong>
+                {freeLog.map((line, i) => (
+                  <div key={i}>{line}</div>
+                ))}
+              </div>
+            )}
+
+            {sfLog.length > 0 && (
+              <div className="log">
+                <strong>SpiderFoot</strong>
+                {sfLog.map((line, i) => (
+                  <div key={i}>{line}</div>
+                ))}
+              </div>
+            )}
+
             {(lookupLog.length > 0 || sherlockLog.length > 0) && (
-              <div className="line-item">
+              <div className="log">
+                <strong>Keyed providers</strong>
                 {[...lookupLog, ...sherlockLog].map((line, i) => (
                   <div key={i}>{line}</div>
                 ))}
               </div>
+            )}
+
+            {lastFree && (
+              <article className="line-item">
+                <strong>
+                  free recon — {lastFree.query} ({lastFree.queryType})
+                </strong>
+                {lastFree.results.map((r) => (
+                  <div key={r.provider} style={{ marginTop: '0.4rem' }}>
+                    <em>{r.provider}</em>
+                    {!r.ok && <div className="muted">{r.error}</div>}
+                    {r.ok && r.rawSummary ? <div className="muted">{r.rawSummary}</div> : null}
+                    <ul className="match-list">
+                      {r.hits.slice(0, 25).map((h: any, i: number) => (
+                        <li key={i}>
+                          {typeof h === 'string' ? (
+                            h
+                          ) : h?.url ? (
+                            <a href={h.url} target="_blank" rel="noreferrer">
+                              {h.title || h.url}
+                            </a>
+                          ) : (
+                            (h && h.title) || String(h)
+                          )}
+                          {typeof h === 'object' && h?.detail ? ` — ${h.detail}` : ''}
+                        </li>
+                      ))}
+                      {r.ok && r.hits.length === 0 && <li className="muted">No hits</li>}
+                    </ul>
+                  </div>
+                ))}
+              </article>
             )}
 
             {lastProviders.map((r) => (
@@ -490,8 +777,7 @@ export function App() {
             {lastSherlock &&
               lastSherlock.map((result) => (
                 <div key={result.username} className="line-item">
-                  <strong>sherlock — {result.username}</strong>{' '}
-                  <em>({result.mode})</em>
+                  <strong>sherlock — {result.username}</strong> <em>({result.mode})</em>
                   <ul className="match-list">
                     {result.hits
                       .filter((h) => h.status === 'found')
@@ -514,18 +800,61 @@ export function App() {
         {activeCase && activeTab === 'entities' && (
           <section className="panel full">
             <h2>Entities — {activeCase.name}</h2>
+            <p className="muted">
+              Tools never verify. Promote confidence one step, or mark a finding verified as the
+              analyst. Verified findings are pinned to High.
+            </p>
             {activeCase.entities.length === 0 && (
               <div className="line-item muted">No entities yet. Run a live lookup.</div>
             )}
             <div className="cards">
               {activeCase.entities.map((entity) => (
-                <article key={entity.id} className="card">
-                  <strong>{entity.name}</strong>
-                  <span>
-                    {entity.type} · <em>{entity.confidence}</em>
-                  </span>
+                <article
+                  key={entity.id}
+                  className={`card${entity.verified ? ' verified' : ''}`}
+                >
+                  <div className="card-head static">
+                    <strong>{entity.name}</strong>
+                    <span>
+                      {entity.type} · <ConfidenceBadge value={entity.confidence} verified={entity.verified} />
+                    </span>
+                  </div>
                   <small>{entity.identifiers.join(' · ')}</small>
                   {entity.notes && <p className="muted">{entity.notes}</p>}
+                  {entity.verified && entity.verifiedBy && (
+                    <small className="muted">
+                      Verified by {entity.verifiedBy}
+                      {entity.verifiedAt ? ` · ${new Date(entity.verifiedAt).toLocaleString()}` : ''}
+                    </small>
+                  )}
+                  <div className="actions-row">
+                    <button
+                      className="action ghost small"
+                      onClick={() => updateCase(promoteEntityConfidence(activeCase, entity.id))}
+                    >
+                      Promote ▲
+                    </button>
+                    <button
+                      className="action small"
+                      onClick={() => updateCase(verifyEntity(activeCase, entity.id))}
+                    >
+                      Verify ✓
+                    </button>
+                    {entity.verified && (
+                      <button
+                        className="action ghost small"
+                        onClick={() => updateCase(unverifyEntity(activeCase, entity.id))}
+                      >
+                        Unverify
+                      </button>
+                    )}
+                    <button
+                      className="action danger small"
+                      onClick={() => updateCase(removeEntity(activeCase, entity.id))}
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </article>
               ))}
             </div>
@@ -540,17 +869,51 @@ export function App() {
             )}
             <div className="cards">
               {activeCase.evidence.map((evidence) => (
-                <article key={evidence.id} className="card">
-                  <strong>{evidence.title}</strong>
+                <article
+                  key={evidence.id}
+                  className={`card${evidence.verified ? ' verified' : ''}`}
+                >
+                  <div className="card-head static">
+                    <strong>{evidence.title}</strong>
+                    <ConfidenceBadge value={evidence.confidence} verified={evidence.verified} />
+                  </div>
                   {evidence.url && (
                     <a href={evidence.url} target="_blank" rel="noreferrer">
                       {evidence.url}
                     </a>
                   )}
                   <p className="muted">{evidence.notes}</p>
-                  <small>
-                    {evidence.tags.join(', ')} · {evidence.confidence}
-                  </small>
+                  <small>{evidence.tags.join(', ')}</small>
+                  <div className="actions-row">
+                    <button
+                      className="action ghost small"
+                      onClick={() =>
+                        updateCase(promoteEvidenceConfidence(activeCase, evidence.id))
+                      }
+                    >
+                      Promote ▲
+                    </button>
+                    <button
+                      className="action small"
+                      onClick={() => updateCase(verifyEvidence(activeCase, evidence.id))}
+                    >
+                      Verify ✓
+                    </button>
+                    {evidence.verified && (
+                      <button
+                        className="action ghost small"
+                        onClick={() => updateCase(unverifyEvidence(activeCase, evidence.id))}
+                      >
+                        Unverify
+                      </button>
+                    )}
+                    <button
+                      className="action danger small"
+                      onClick={() => updateCase(removeEvidence(activeCase, evidence.id))}
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </article>
               ))}
             </div>
@@ -561,9 +924,7 @@ export function App() {
           <section className="panel full two-col">
             <article>
               <h2>Timeline</h2>
-              {activeCase.events.length === 0 && (
-                <div className="line-item muted">No events</div>
-              )}
+              {activeCase.events.length === 0 && <div className="line-item muted">No events</div>}
               {activeCase.events.map((event: TimelineEvent) => (
                 <div key={event.id} className="line-item">
                   {event.date} — {event.title}
@@ -598,11 +959,65 @@ export function App() {
                   const target =
                     activeCase.entities.find((e) => e.id === rel.targetId)?.name ?? 'Unknown';
                   return (
-                    <div key={rel.id} className="line-item">
-                      {source} → {target} · {rel.type} ({rel.confidence})
+                    <div key={rel.id} className="line-item rel-row">
+                      <span>
+                        {source} → {target} · {rel.type}{' '}
+                        <ConfidenceBadge value={rel.confidence} />
+                      </span>
+                      <button
+                        className="action danger small"
+                        onClick={() => updateCase(removeRelationship(activeCase, rel.id))}
+                      >
+                        Remove
+                      </button>
                     </div>
                   );
                 })}
+
+                <article className="line-item" style={{ marginTop: '1rem' }}>
+                  <strong>Link two entities</strong>
+                  <div className="actions-row" style={{ marginTop: '0.5rem' }}>
+                    <select
+                      value={relSource}
+                      onChange={(e) => setRelSource(e.target.value)}
+                      style={inputStyle}
+                    >
+                      <option value="">source…</option>
+                      {activeCase.entities.map((e) => (
+                        <option key={e.id} value={e.id}>
+                          {e.name}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={relTarget}
+                      onChange={(e) => setRelTarget(e.target.value)}
+                      style={inputStyle}
+                    >
+                      <option value="">target…</option>
+                      {activeCase.entities.map((e) => (
+                        <option key={e.id} value={e.id}>
+                          {e.name}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      value={relType}
+                      onChange={(e) => setRelType(e.target.value)}
+                      placeholder="relationship (e.g. owns, alias-of)"
+                      style={inputStyle}
+                    />
+                    <button
+                      className="action"
+                      onClick={() => {
+                        updateCase(addRelationship(activeCase, relSource, relTarget, relType));
+                        setRelType('');
+                      }}
+                    >
+                      Add link
+                    </button>
+                  </div>
+                </article>
               </article>
               <article>
                 <h2>Cross-case correlation</h2>
@@ -632,8 +1047,7 @@ export function App() {
           <section className="panel full">
             <h2>OSINT Framework</h2>
             <p className="muted">
-              Optional external tool links. Prefer the Lookup tab for live API data into this
-              case.
+              Optional external tool links. Prefer the Lookup tab for live API data into this case.
             </p>
             <div className="actions-row" style={{ marginBottom: '0.75rem' }}>
               <button className="action" onClick={() => void loadFramework()} disabled={frameworkLoading}>
@@ -647,18 +1061,14 @@ export function App() {
                   value={frameworkQuery}
                   onChange={(e) => setFrameworkQuery(e.target.value)}
                   placeholder="Optional query for external tools"
-                  style={{
-                    width: '100%',
-                    minHeight: 44,
-                    margin: '0.75rem 0',
-                    padding: '0.75rem 1rem',
-                    borderRadius: 12,
-                    border: '1px solid rgba(0,0,0,.15)',
-                  }}
+                  style={{ ...inputStyle, borderRadius: 12, width: '100%', margin: '0.75rem 0' }}
                 />
                 {framework.categories.map((cat) => (
                   <article key={cat.id} style={{ marginBottom: '1rem' }}>
-                    <h3>{cat.name}</h3>
+                    <h3>
+                      {cat.name}
+                      {cat.id === 'free' && <span className="chip chip-free">no key</span>}
+                    </h3>
                     <div className="cards">
                       {cat.tools.map((tool) => (
                         <div key={tool.id} className="card">

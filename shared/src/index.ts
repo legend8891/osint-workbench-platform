@@ -10,6 +10,11 @@ export const entitySchema = z.object({
   confidence: confidenceSchema,
   identifiers: z.array(z.string()),
   notes: z.string(),
+  // Analyst verification workflow — a finding is only "verified" once a human
+  // explicitly promotes it. Tools never set these.
+  verified: z.boolean().optional(),
+  verifiedAt: z.string().optional(),
+  verifiedBy: z.string().optional(),
 });
 export type EntityRecord = z.infer<typeof entitySchema>;
 
@@ -41,6 +46,9 @@ export const evidenceSchema = z.object({
   eventDate: z.string(),
   date: z.string(),
   attachments: z.array(attachmentSchema),
+  verified: z.boolean().optional(),
+  verifiedAt: z.string().optional(),
+  verifiedBy: z.string().optional(),
 });
 export type EvidenceRecord = z.infer<typeof evidenceSchema>;
 
@@ -93,3 +101,18 @@ export type CorrelationHit = {
   token: string;
   matches: CorrelationMatch[];
 };
+
+/** Ordered confidence ladder used by the analyst verification workflow. */
+export const CONFIDENCE_ORDER: Confidence[] = ['Unverified', 'Low', 'Medium', 'High'];
+
+/** Promote a confidence value one step up the ladder (capped at High). */
+export function promoteConfidence(current: Confidence): Confidence {
+  const idx = CONFIDENCE_ORDER.indexOf(current);
+  if (idx < 0) return 'Low';
+  return CONFIDENCE_ORDER[Math.min(idx + 1, CONFIDENCE_ORDER.length - 1)];
+}
+
+/** A record is "verified" only when an analyst explicitly marks it so. */
+export function isVerified(record: { verified?: boolean }): boolean {
+  return record.verified === true;
+}

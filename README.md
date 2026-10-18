@@ -1,8 +1,8 @@
 # OSINT Workbench Platform
 
-iOS-first OSINT web application monorepo with React/Vite client, Express API, shared Zod contracts, PWA shell, entity graph workflow, cross-case correlation, Sherlock username enumeration, GraphML export, and evidence package export.
+iOS-first OSINT web application monorepo with React/Vite client, Express API, shared Zod contracts, PWA shell, entity graph workflow, cross-case correlation, Sherlock username enumeration, **free no-key recon**, an **analyst verification workflow**, GraphML export, and evidence package export.
 
-**Version:** 0.7.0
+**Version:** 0.11.0
 
 ## Stack
 - React + Vite + TypeScript (client)
@@ -12,6 +12,15 @@ iOS-first OSINT web application monorepo with React/Vite client, Express API, sh
 - JSZip evidence bundles
 - GraphML export (Maltego / Gephi / yEd)
 - Sherlock CLI or Node fallback for username enumeration
+
+## What's new in 0.11
+- **Free recon (no API keys)** — DNS-over-HTTPS, RDAP WHOIS, certificate transparency (crt.sh), HackerTarget host search, IP geolocation (ipwho.is), Gravatar, and the Wayback Machine. Works out of the box.
+- **Auto-detect target type** — one endpoint classifies a domain / IP / email / URL and runs the applicable free providers.
+- **Analyst verification workflow** — promote confidence one rung at a time, or mark a finding *verified* (pinned to High, stamped with who/when, and recorded in provenance). Tools never verify.
+- **Persistence** — cases survive a page reload (localStorage).
+- **Case management** — rename and delete cases.
+- **Relationship editor** — link entities in the Graph tab.
+- **Confidence colour-coding** and provider status chips in the header.
 
 ## Quick start (development)
 
@@ -25,6 +34,7 @@ npm run dev
 |---------|-----|
 | Client UI | http://localhost:5173 |
 | API health | http://localhost:8787/health |
+| Free recon | `POST /api/scan/free` |
 | Sherlock | `POST /api/scan/sherlock` |
 
 Or: `./scripts/dev-bootstrap.sh`
@@ -57,16 +67,47 @@ Without Sherlock CLI, the Node fallback still works. Extend the image with `pipx
 ## Features
 
 - Cases / entities / evidence / timeline / provenance
+- **Free no-key recon** (DNS, RDAP, CT logs, host search, IP geo, Gravatar, Wayback) with auto-detect
+- **Analyst verification workflow** with confidence ladder (Unverified → Low → Medium → High)
+- **Persistence** (localStorage) + case rename / delete
+- **Relationship editor** for the entity graph
 - Cross-case token correlation (normalized identifiers; POSSIBLE only)
-- Sherlock scan (Graph tab) merges evidence + entities + provenance
+- Sherlock scan merges evidence + entities + provenance
 - Exports: Case JSON, HTML report, GraphML, ZIP bundle (includes GraphML)
 - Archive preference: evidence carries archiveUrl (Wayback template)
+
+## Free recon endpoints (no API key)
+
+| Endpoint | Input | Provider |
+|----------|-------|----------|
+| `POST /api/scan/free` | `{ "target": "example.com" }` | auto-detect (runs all applicable) |
+| `POST /api/scan/dns` | `{ "domain": "example.com" }` | Cloudflare DNS-over-HTTPS |
+| `POST /api/scan/rdap` | `{ "domain": "example.com" }` | RDAP (rdap.org) |
+| `POST /api/scan/crtsh` | `{ "domain": "example.com" }` | crt.sh certificate transparency |
+| `POST /api/scan/hostsearch` | `{ "domain": "example.com" }` | HackerTarget host search |
+| `POST /api/scan/ipgeo` | `{ "ip": "1.1.1.1" }` | ipwho.is geolocation |
+| `POST /api/scan/gravatar` | `{ "email": "a@b.com" }` | Gravatar profile |
+| `POST /api/scan/wayback` | `{ "target": "example.com" }` | Wayback Machine availability |
+
+Example:
+
+```bash
+curl -s -X POST http://localhost:8787/api/scan/free \
+  -H 'Content-Type: application/json' \
+  -d '{"target":"example.com"}'
+```
 
 ## Confidence rules
 
 - Tools never set VERIFIED
 - Hits are POSSIBLE with Low–Medium confidence
+- An analyst can *promote* confidence one step or mark a finding *verified* (→ High)
+- Verified records store `verified`, `verifiedAt`, `verifiedBy` and append a provenance entry
 - GraphML verification attributes are always POSSIBLE_*
+
+## Keyed providers (optional)
+
+Paid providers activate only when their server environment keys are set; otherwise they return an explicit error and never fake data. See `.env.example` for the full list (HIBP, Hunter, Shodan, VirusTotal, AbuseIPDB, Numverify).
 
 ## Sherlock
 
@@ -100,4 +141,12 @@ Dockerfile  multi-stage production image
 ```
 DATABASE_URL="file:./dev.db"
 PORT=8787
+# Optional paid providers — leave blank to disable
+HIBP_API_KEY=
+HUNTER_API_KEY=
+SHODAN_API_KEY=
+VIRUSTOTAL_API_KEY=
+ABUSEIPDB_API_KEY=
+NUMVERIFY_API_KEY=
+SPIDERFOOT_BIN=
 ```

@@ -5,8 +5,10 @@ import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 import { sampleApiCaseResponse } from './routes/sample.js';
 import { scanRouter } from './routes/scan.js';
+import { freeRouter } from './routes/free.js';
 import { frameworkRouter } from './routes/framework.js';
 import { getProviderStatuses } from './services/framework.js';
+import { FREE_PROVIDER_IDS } from './services/freerecon.js';
 import { rateLimitMiddleware } from './middleware/rateLimit.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -30,10 +32,11 @@ const LIVE_PROVIDER_IDS = new Set([
 app.get('/health', (_req, res) => {
   const providers = getProviderStatuses();
   const live = providers.filter((p) => LIVE_PROVIDER_IDS.has(p.id));
+  const free = providers.filter((p) => (FREE_PROVIDER_IDS as readonly string[]).includes(p.id));
   res.json({
     ok: true,
     service: 'osint-workbench-api',
-    version: '0.10.2',
+    version: '0.11.0',
     rateLimit: {
       windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS) || 60_000,
       maxApi: Number(process.env.RATE_LIMIT_MAX) || 30,
@@ -46,9 +49,15 @@ app.get('/health', (_req, res) => {
     })),
     providersConfigured: live.filter((p) => p.configured).map((p) => p.id),
     providersMissing: live.filter((p) => !p.configured && p.envKey !== '(none)').map((p) => p.id),
+    freeProviders: free.map((p) => p.id),
     framework: {
       categories: true,
       path: '/api/framework',
+    },
+    freeRecon: {
+      path: '/api/scan/free',
+      note: 'No API keys required. Auto-detects target type (domain/IP/email/URL).',
+      providers: [...FREE_PROVIDER_IDS],
     },
     spiderfoot: {
       path: '/api/scan/spiderfoot',
@@ -62,6 +71,7 @@ app.get('/api/cases/sample', (_req, res) => {
 });
 
 app.use('/api/scan', scanRouter);
+app.use('/api/scan', freeRouter);
 app.use('/api/framework', frameworkRouter);
 
 const clientDist = path.resolve(__dirname, '../../client/dist');
@@ -81,6 +91,7 @@ app.listen(PORT, () => {
   console.log(`  Framework:  GET  /api/framework`);
   console.log(`  Sherlock:   POST /api/scan/sherlock`);
   console.log(`  SpiderFoot: POST /api/scan/spiderfoot`);
+  console.log(`  Free recon: POST /api/scan/free (no keys)`);
   console.log(`  Email:      POST /api/scan/email`);
   console.log(`  Domain/IP:  POST /api/scan/hunter|shodan|...`);
   console.log(

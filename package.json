@@ -1,8 +1,12 @@
 {
   "name": "osint-workbench-platform",
   "private": true,
-  "version": "0.8.0",
-  "workspaces": ["client", "server", "shared"],
+  "version": "0.11.0",
+  "workspaces": [
+    "client",
+    "server",
+    "shared"
+  ],
   "scripts": {
     "dev": "concurrently -n shared,server,client -c cyan,magenta,green \"npm --workspace shared run build:watch\" \"npm --workspace server run dev\" \"npm --workspace client run dev\"",
     "build": "npm --workspace shared run build && npm --workspace client run build && npm --workspace server run build",
@@ -16,5 +20,9 @@
   },
   "engines": {
     "node": ">=20 <23"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "esbuild@0.21.5": true
   }
 }

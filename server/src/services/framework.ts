@@ -35,6 +35,21 @@ export type ProviderStatus = {
 
 export const FRAMEWORK_CATEGORIES: FrameworkCategory[] = [
   {
+    id: 'free',
+    name: 'Free Recon (no key)',
+    description: 'In-app providers that need no API key — DNS, WHOIS/RDAP, CT logs, IP geo, Gravatar, Wayback.',
+    tools: [
+      { id: 'free-recon', name: 'Free Recon (auto)', description: 'Auto-detects domain/IP/email/URL and runs all applicable free providers.', url: '/api/scan/free', flag: 'free', opsec: 'passive', providerId: 'freerecon' },
+      { id: 'dns', name: 'DNS records (DoH)', description: 'A/AAAA/MX/TXT/NS/CNAME via Cloudflare DNS-over-HTTPS.', url: '/api/scan/dns', flag: 'free', opsec: 'passive', providerId: 'dns' },
+      { id: 'rdap', name: 'RDAP / WHOIS', description: 'Domain registration, registrar, nameservers, status.', url: '/api/scan/rdap', flag: 'free', opsec: 'passive', providerId: 'rdap' },
+      { id: 'crtsh-inapp', name: 'crt.sh (in-app)', description: 'Subdomain discovery from Certificate Transparency logs.', url: '/api/scan/crtsh', flag: 'free', opsec: 'passive', providerId: 'crtsh' },
+      { id: 'hostsearch', name: 'HackerTarget hostsearch', description: 'Subdomain + IP discovery (free, no key).', url: '/api/scan/hostsearch', flag: 'free', opsec: 'passive', providerId: 'hostsearch' },
+      { id: 'ipgeo', name: 'IP geolocation', description: 'Geolocation, ISP, ASN for an IP via ipwho.is.', url: '/api/scan/ipgeo', flag: 'free', opsec: 'passive', providerId: 'ipgeo' },
+      { id: 'gravatar', name: 'Gravatar', description: 'Public profile + linked accounts for an email.', url: '/api/scan/gravatar', flag: 'free', opsec: 'passive', providerId: 'gravatar' },
+      { id: 'wayback-inapp', name: 'Wayback Machine (in-app)', description: 'Nearest archived snapshot of a URL/domain.', url: '/api/scan/wayback', flag: 'free', opsec: 'passive', providerId: 'wayback' },
+    ],
+  },
+  {
     id: 'username',
     name: 'Username',
     description: 'Hunt accounts and handles across platforms.',
@@ -145,6 +160,14 @@ export const FRAMEWORK_CATEGORIES: FrameworkCategory[] = [
 
 const PROVIDER_ENV: Record<string, { name: string; category: string; envKey: string; endpoint?: string }> = {
   sherlock: { name: 'Sherlock', category: 'username', envKey: '', endpoint: '/api/scan/sherlock' },
+  freerecon: { name: 'Free Recon (auto)', category: 'free', envKey: '', endpoint: '/api/scan/free' },
+  dns: { name: 'DNS (DoH)', category: 'free', envKey: '', endpoint: '/api/scan/dns' },
+  rdap: { name: 'RDAP / WHOIS', category: 'free', envKey: '', endpoint: '/api/scan/rdap' },
+  crtsh: { name: 'crt.sh', category: 'free', envKey: '', endpoint: '/api/scan/crtsh' },
+  hostsearch: { name: 'HackerTarget', category: 'free', envKey: '', endpoint: '/api/scan/hostsearch' },
+  ipgeo: { name: 'IP geolocation', category: 'free', envKey: '', endpoint: '/api/scan/ipgeo' },
+  gravatar: { name: 'Gravatar', category: 'free', envKey: '', endpoint: '/api/scan/gravatar' },
+  wayback: { name: 'Wayback Machine', category: 'free', envKey: '', endpoint: '/api/scan/wayback' },
   hibp: { name: 'Have I Been Pwned', category: 'email', envKey: 'HIBP_API_KEY' },
   hunterio: { name: 'Hunter.io', category: 'email', envKey: 'HUNTER_API_KEY' },
   leakcheck: { name: 'LeakCheck', category: 'email', envKey: 'LEAKCHECK_API_KEY' },
