@@ -20,7 +20,7 @@
     "react-dom": "^18.3.1",
     "shared": "*",
     "typescript": "^5.5.4",
-    "vite": "^7.3.7",
+    "vite": "^8.3.4",
     "zod": "^3.23.8"
   },
   "devDependencies": {
