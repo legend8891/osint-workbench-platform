@@ -569,6 +569,184 @@ export async function lookupIpGeo(ip: string): Promise<ProviderLookupResult> {
   };
 }
 
+/* ------------------------------------------------------- Shodan InternetDB */
+
+/**
+ * Shodan InternetDB (https://internetdb.shodan.io) — free, no API key.
+ * Returns open ports, hostnames, CPEs, known CVEs and tags for an IP.
+ * A 404 means the IP simply has no recorded exposure data.
+ */
+export async function lookupInternetDb(ip: string): Promise<ProviderLookupResult> {
+  const provider = 'internetdb';
+  const queryType = 'ip';
+  const url = `https://internetdb.shodan.io/${encodeURIComponent(ip)}`;
+  const { ok, status, data } = await throttled(() => getJson(url, { timeoutMs: 12_000 }));
+
+  if (status === 404) {
+    const entity = makeEntity(ip, 'ip', [ip], 'InternetDB: no exposure data');
+    return {
+      provider,
+      query: ip,
+      queryType,
+      configured: true,
+      ok: true,
+      hits: [],
+      rawSummary: 'InternetDB has no data for this IP.',
+      entities: [entity],
+      evidence: [],
+      provenance: [
+        makeProv(entity.id, '', `InternetDB has no data for ${ip}`, 'internetdb.shodan.io'),
+      ],
+    };
+  }
+  if (!ok || !data || typeof data !== 'object') {
+    return emptyResult(provider, ip, queryType, `InternetDB lookup failed (HTTP ${status})`);
+  }
+
+  const d = data as {
+    hostnames?: string[];
+    ports?: number[];
+    cpes?: string[];
+    tags?: string[];
+    vulns?: string[];
+  };
+  const hostnames = Array.isArray(d.hostnames) ? d.hostnames : [];
+  const ports = Array.isArray(d.ports) ? d.ports : [];
+  const cpes = Array.isArray(d.cpes) ? d.cpes : [];
+  const tags = Array.isArray(d.tags) ? d.tags : [];
+  const vulns = Array.isArray(d.vulns) ? d.vulns : [];
+
+  const entity = makeEntity(
+    ip,
+    'ip',
+    [ip, ...hostnames],
+    `InternetDB: ${ports.length} open port(s), ${vulns.length} CVE(s)${tags.length ? `, tags: ${tags.join(', ')}` : ''}`
+  );
+  const hits: ProviderHit[] = [
+    ...ports.map((p) => ({ title: `port ${p}`, url: '', detail: '', tags: ['internetdb', 'port'] })),
+    ...hostnames.map((h) => ({ title: `hostname: ${h}`, url: `https://${h}`, detail: '', tags: ['internetdb', 'hostname'] })),
+    ...cpes.map((c) => ({ title: `cpe: ${c}`, url: '', detail: '', tags: ['internetdb', 'cpe'] })),
+    ...vulns.map((v) => ({ title: `CVE: ${v}`, url: `https://nvd.nist.gov/vuln/detail/${v}`, detail: '', tags: ['internetdb', 'cve'] })),
+    ...tags.map((t) => ({ title: `tag: ${t}`, url: '', detail: '', tags: ['internetdb', 'tag'] })),
+  ];
+  const evidence = [
+    makeEvidence(
+      `Shodan InternetDB exposure for ${ip}`,
+      `https://internetdb.shodan.io/${encodeURIComponent(ip)}`,
+      ['internetdb', 'ip', 'exposure'],
+      entity.id,
+      entity.notes
+    ),
+  ];
+  return {
+    provider,
+    query: ip,
+    queryType,
+    configured: true,
+    ok: true,
+    hits,
+    rawSummary: `InternetDB: ${ports.length} port(s)${vulns.length ? `, ${vulns.length} CVE(s)` : ''}${tags.length ? `, tags: ${tags.join(', ')}` : ''}`,
+    entities: [entity],
+    evidence,
+    provenance: [
+      makeProv(entity.id, evidence[0].id, `InternetDB reported ${ports.length} open port(s) for ${ip}`, 'internetdb.shodan.io'),
+    ],
+  };
+}
+
+/* --------------------------------------------------------------- IP RDAP */
+
+/**
+ * IP RDAP (rdap.org → the responsible RIR) — free, no API key.
+ * Returns the registered network block, allocation country and organisation.
+ */
+export async function lookupIpRdap(ip: string): Promise<ProviderLookupResult> {
+  const provider = 'iprdap';
+  const queryType = 'ip';
+  const url = `https://rdap.org/ip/${encodeURIComponent(ip)}`;
+  const { ok, status, data } = await throttled(() => getJson(url, { timeoutMs: 15_000 }));
+
+  if (status === 404) {
+    return emptyResult(provider, ip, queryType, 'No RDAP record for this IP');
+  }
+  if (!ok || !data || typeof data !== 'object') {
+    return emptyResult(provider, ip, queryType, `IP RDAP lookup failed (HTTP ${status})`);
+  }
+
+  const d = data as {
+    handle?: string;
+    name?: string;
+    type?: string;
+    country?: string;
+    startAddress?: string;
+    endAddress?: string;
+    events?: RdapEvent[];
+    entities?: RdapEntity[];
+  };
+  const events = Array.isArray(d.events) ? d.events : [];
+  const pick = (action: string) =>
+    events.find((e) => e.eventAction === action)?.eventDate ?? '';
+  const range = [d.startAddress, d.endAddress].filter(Boolean).join(' \u2013 ');
+  const netname = d.name ?? d.handle ?? '';
+
+  let org = '';
+  const entities = Array.isArray(d.entities) ? d.entities : [];
+  for (const ent of entities) {
+    if (!Array.isArray(ent.vcardArray)) continue;
+    const vcard = ent.vcardArray[1];
+    if (!Array.isArray(vcard)) continue;
+    const fn = vcard.find((row) => Array.isArray(row) && row[0] === 'fn');
+    if (Array.isArray(fn) && fn[3]) {
+      org = String(fn[3]);
+      break;
+    }
+  }
+
+  const identifiers = [ip, netname, range, d.country ?? '', org].filter(Boolean);
+  const entity = makeEntity(
+    netname || ip,
+    'ip',
+    identifiers,
+    `IP RDAP: ${range || 'n/a'}${d.country ? `, ${d.country}` : ''}${org ? `, ${org}` : ''}`
+  );
+  const hits: ProviderHit[] = [
+    ...(netname ? [{ title: `network: ${netname}`, url: '', detail: '', tags: ['iprdap'] }] : []),
+    ...(range ? [{ title: `range: ${range}`, url: '', detail: '', tags: ['iprdap'] }] : []),
+    ...(d.country ? [{ title: `country: ${d.country}`, url: '', detail: '', tags: ['iprdap'] }] : []),
+    ...(org ? [{ title: `org: ${org}`, url: '', detail: '', tags: ['iprdap'] }] : []),
+    ...(d.type ? [{ title: `type: ${d.type}`, url: '', detail: '', tags: ['iprdap'] }] : []),
+    ...(pick('registration')
+      ? [{ title: `registered: ${pick('registration')}`, url: '', detail: '', tags: ['iprdap'] }]
+      : []),
+    ...(pick('last changed')
+      ? [{ title: `last changed: ${pick('last changed')}`, url: '', detail: '', tags: ['iprdap'] }]
+      : []),
+  ];
+  const evidence = [
+    makeEvidence(
+      `IP RDAP registration for ${ip}`,
+      `https://rdap.org/ip/${encodeURIComponent(ip)}`,
+      ['iprdap', 'ip', 'whois'],
+      entity.id,
+      entity.notes
+    ),
+  ];
+  return {
+    provider,
+    query: ip,
+    queryType,
+    configured: true,
+    ok: true,
+    hits,
+    rawSummary: `IP RDAP: ${range || 'n/a'}${d.country ? ` \u00b7 ${d.country}` : ''}${org ? ` \u00b7 ${org}` : ''}`,
+    entities: [entity],
+    evidence,
+    provenance: [
+      makeProv(entity.id, evidence[0].id, `RDAP registered network ${netname || range || ip}`, 'rdap.org'),
+    ],
+  };
+}
+
 /* -------------------------------------------------------------- Gravatar */
 
 export async function lookupGravatar(email: string): Promise<ProviderLookupResult> {
@@ -753,7 +931,7 @@ export async function runFreeRecon(target: string): Promise<FreeReconResponse> {
       lookupWayback(query)
     );
   } else if (queryType === 'ip') {
-    tasks.push(lookupIpGeo(query));
+    tasks.push(lookupIpGeo(query), lookupInternetDb(query), lookupIpRdap(query));
   } else if (queryType === 'email') {
     tasks.push(lookupGravatar(query));
   } else if (queryType === 'url') {
@@ -775,6 +953,8 @@ export const FREE_PROVIDER_IDS = [
   'crtsh',
   'hostsearch',
   'ipgeo',
+  'internetdb',
+  'iprdap',
   'gravatar',
   'wayback',
 ] as const;

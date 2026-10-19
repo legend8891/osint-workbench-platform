@@ -113,7 +113,7 @@ function parseSherlockStdout(stdout: string): SherlockHit[] {
       });
       continue;
     }
-    const notFound = line.match(/\[\-\]\s+([^:]+):/i);
+    const notFound = line.match(/\[-\]\s+([^:]+):/i);
     if (notFound) {
       hits.push({
         site: notFound[1].trim(),

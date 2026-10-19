@@ -2,7 +2,7 @@
 
 iOS-first OSINT web application monorepo with React/Vite client, Express API, shared Zod contracts, PWA shell, entity graph workflow, cross-case correlation, Sherlock username enumeration, **free no-key recon**, an **analyst verification workflow**, GraphML export, and evidence package export.
 
-**Version:** 0.11.0
+**Version:** 0.12.0
 
 ## Stack
 - React + Vite + TypeScript (client)
@@ -12,6 +12,17 @@ iOS-first OSINT web application monorepo with React/Vite client, Express API, sh
 - JSZip evidence bundles
 - GraphML export (Maltego / Gephi / yEd)
 - Sherlock CLI or Node fallback for username enumeration
+- Vitest + GitHub Actions CI
+
+## What's new in 0.12
+- **Two more keyless providers** — **Shodan InternetDB** (open ports, CVEs, hostnames, tags for an IP) and **IP RDAP** (registered network block, country, org). Both need no API key.
+- **Case import** — round-trip a previously exported case JSON straight back into the workbench, validated against the shared schema.
+- **Security hardening** — `helmet` security headers + a strict Content-Security-Policy, opt-in CORS allow-list via `ALLOWED_ORIGINS`, rate-limit keyed on the trusted client IP, production source maps off, and graceful `SIGTERM`/`SIGINT` shutdown.
+- **Version from `package.json`** — `/health` no longer hard-codes the version (and no longer leaks env-var names).
+- **Richer exports** — the HTML report now includes evidence, relationships, timeline, provenance and cross-case correlation with print-friendly CSS; every export filename is sanitised.
+- **Smarter merging** — provider results de-duplicate entities by type+name (unioning identifiers) and never downgrade an analyst-verified finding.
+- **GraphML correlation** — exported graphs now carry a per-node `correlation` data key.
+- **Tests + CI** — 40 Vitest unit tests over the pure logic, and a GitHub Actions workflow that builds, lints and tests on every push/PR.
 
 ## What's new in 0.11
 - **Free recon (no API keys)** — DNS-over-HTTPS, RDAP WHOIS, certificate transparency (crt.sh), HackerTarget host search, IP geolocation (ipwho.is), Gravatar, and the Wayback Machine. Works out of the box.
@@ -67,13 +78,13 @@ Without Sherlock CLI, the Node fallback still works. Extend the image with `pipx
 ## Features
 
 - Cases / entities / evidence / timeline / provenance
-- **Free no-key recon** (DNS, RDAP, CT logs, host search, IP geo, Gravatar, Wayback) with auto-detect
+- **Free no-key recon** (DNS, RDAP, CT logs, host search, IP geo, Shodan InternetDB, IP RDAP, Gravatar, Wayback) with auto-detect
 - **Analyst verification workflow** with confidence ladder (Unverified → Low → Medium → High)
-- **Persistence** (localStorage) + case rename / delete
+- **Persistence** (localStorage) + case rename / delete + **case JSON import**
 - **Relationship editor** for the entity graph
 - Cross-case token correlation (normalized identifiers; POSSIBLE only)
 - Sherlock scan merges evidence + entities + provenance
-- Exports: Case JSON, HTML report, GraphML, ZIP bundle (includes GraphML)
+- Exports: Case JSON, HTML report, GraphML (with correlation), ZIP bundle (includes GraphML)
 - Archive preference: evidence carries archiveUrl (Wayback template)
 
 ## Free recon endpoints (no API key)
@@ -86,6 +97,8 @@ Without Sherlock CLI, the Node fallback still works. Extend the image with `pipx
 | `POST /api/scan/crtsh` | `{ "domain": "example.com" }` | crt.sh certificate transparency |
 | `POST /api/scan/hostsearch` | `{ "domain": "example.com" }` | HackerTarget host search |
 | `POST /api/scan/ipgeo` | `{ "ip": "1.1.1.1" }` | ipwho.is geolocation |
+| `POST /api/scan/internetdb` | `{ "ip": "1.1.1.1" }` | Shodan InternetDB (ports/CVEs/tags) |
+| `POST /api/scan/iprdap` | `{ "ip": "8.8.8.8" }` | IP RDAP (network block / country / org) |
 | `POST /api/scan/gravatar` | `{ "email": "a@b.com" }` | Gravatar profile |
 | `POST /api/scan/wayback` | `{ "target": "example.com" }` | Wayback Machine availability |
 
@@ -133,6 +146,7 @@ server/     Express API + static host in production
 shared/     Zod schemas & types
 prisma/     SQLite placeholder
 scripts/    dev-bootstrap.sh, prod-start.sh
+.github/    GitHub Actions CI (build · lint · test)
 Dockerfile  multi-stage production image
 ```
 
@@ -141,6 +155,9 @@ Dockerfile  multi-stage production image
 ```
 DATABASE_URL="file:./dev.db"
 PORT=8787
+# Optional: comma-separated origins allowed to call the API cross-origin.
+# Leave unset to allow all (same-origin deployments don't need it).
+ALLOWED_ORIGINS=
 # Optional paid providers — leave blank to disable
 HIBP_API_KEY=
 HUNTER_API_KEY=
@@ -150,3 +167,20 @@ ABUSEIPDB_API_KEY=
 NUMVERIFY_API_KEY=
 SPIDERFOOT_BIN=
 ```
+
+## Testing & CI
+
+```bash
+npm test        # Vitest unit tests (shared + client + server pure logic)
+npm run lint    # ESLint (flat config) across client and server
+npm run build   # shared → client → server
+```
+
+`.github/workflows/ci.yml` runs `npm ci` → build → lint → test on every push and pull request to `main`.
+
+## Security notes
+
+- `helmet` sets a strict Content-Security-Policy plus the usual hardening headers. The SPA is fully self-contained (no external assets), so `default-src 'self'` is safe.
+- CORS is open only when `ALLOWED_ORIGINS` is unset; set it to lock the API to specific origins.
+- Rate limiting keys on the trusted client IP (`trust proxy` + `req.ip`), not a spoofable header.
+- Production builds ship **without** source maps. Set `SOURCEMAP=true` to opt in when debugging a deployed build.

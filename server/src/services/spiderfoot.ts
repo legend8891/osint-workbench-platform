@@ -211,7 +211,7 @@ export async function runSpiderfootScan(target: string): Promise<SpiderFootScanR
 
   let lastErr = '';
   let stdout = '';
-  let usedBin = bin;
+  const usedBin = bin;
   let ran = false;
 
   for (const args of argSets) {

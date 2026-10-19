@@ -24,6 +24,8 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: true,
+    // Source maps are off by default so production bundles don't ship source.
+    // Opt in with SOURCEMAP=true when you need to debug a deployed build.
+    sourcemap: process.env.SOURCEMAP === 'true',
   },
 });

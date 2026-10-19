@@ -1,8 +1,9 @@
 import cors from 'cors';
 import express from 'express';
+import helmet from 'helmet';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { sampleApiCaseResponse } from './routes/sample.js';
 import { scanRouter } from './routes/scan.js';
 import { freeRouter } from './routes/free.js';
@@ -14,8 +15,65 @@ import { rateLimitMiddleware } from './middleware/rateLimit.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 
+/** Version is read from the server package.json so /health never drifts. */
+function readVersion(): string {
+  try {
+    const pkgPath = path.resolve(__dirname, '../package.json');
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { version?: string };
+    return pkg.version ?? '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+}
+const VERSION = readVersion();
+
 app.set('trust proxy', 1);
-app.use(cors());
+
+/**
+ * CORS: lock down cross-origin access when ALLOWED_ORIGINS is set
+ * (comma-separated). Same-origin and non-browser (no Origin header)
+ * requests are always allowed. When unset, all origins are allowed so
+ * existing single-process deployments keep working.
+ */
+const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? '')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(new Error(`Origin ${origin} is not allowed by CORS`));
+    },
+  })
+);
+
+/** Security headers. The SPA is fully self-contained (no external assets). */
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      useDefaults: false,
+      directives: {
+        defaultSrc: ["'self'"],
+        baseUri: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:'],
+        fontSrc: ["'self'", 'data:'],
+        connectSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        frameAncestors: ["'none'"],
+        formAction: ["'self'"],
+      },
+    },
+    crossOriginEmbedderPolicy: false,
+  })
+);
+
 app.use(express.json({ limit: '10mb' }));
 app.use(rateLimitMiddleware);
 
@@ -36,7 +94,7 @@ app.get('/health', (_req, res) => {
   res.json({
     ok: true,
     service: 'osint-workbench-api',
-    version: '0.11.0',
+    version: VERSION,
     rateLimit: {
       windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS) || 60_000,
       maxApi: Number(process.env.RATE_LIMIT_MAX) || 30,
@@ -44,7 +102,6 @@ app.get('/health', (_req, res) => {
     },
     keys: live.map((p) => ({
       id: p.id,
-      envKey: p.envKey,
       configured: p.configured,
     })),
     providersConfigured: live.filter((p) => p.configured).map((p) => p.id),
@@ -85,8 +142,8 @@ if (existsSync(clientDist)) {
 }
 
 const PORT = Number(process.env.PORT) || 8787;
-app.listen(PORT, () => {
-  console.log(`OSINT Workbench listening on http://localhost:${PORT}`);
+const server = app.listen(PORT, () => {
+  console.log(`OSINT Workbench v${VERSION} listening on http://localhost:${PORT}`);
   console.log(`  Health:     GET  /health`);
   console.log(`  Framework:  GET  /api/framework`);
   console.log(`  Sherlock:   POST /api/scan/sherlock`);
@@ -97,4 +154,24 @@ app.listen(PORT, () => {
   console.log(
     `  Rate limit: ${Number(process.env.RATE_LIMIT_SCAN_MAX) || 12}/min scan, ${Number(process.env.RATE_LIMIT_MAX) || 30}/min other API`
   );
+  if (allowedOrigins.length > 0) {
+    console.log(`  CORS:       restricted to ${allowedOrigins.join(', ')}`);
+  }
 });
+
+/** Graceful shutdown so in-flight requests finish before the process exits. */
+function shutdown(signal: string) {
+  console.log(`\n${signal} received — shutting down gracefully…`);
+  server.close(() => {
+    console.log('HTTP server closed.');
+    process.exit(0);
+  });
+  // Force-exit if connections linger.
+  setTimeout(() => {
+    console.error('Forcing exit after timeout.');
+    process.exit(1);
+  }, 10_000).unref();
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

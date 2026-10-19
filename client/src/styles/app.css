@@ -95,7 +95,7 @@ button, input, textarea, select { font: inherit; }
 .stats {
   display: grid;
   gap: .75rem;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
 }
 .stats div {
   padding: .75rem;
@@ -192,4 +192,20 @@ button, input, textarea, select { font: inherit; }
 .sherlock-panel button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.banner {
+  margin: 0 0 1rem;
+  padding: .75rem 1rem;
+  border-radius: 10px;
+  border: 1px solid var(--warn);
+  background: #fdf3e3;
+  color: #5a3600;
+  font-size: .9rem;
+  line-height: 1.4;
+}
+.banner-warn strong { color: var(--warn); }
+
+@media (prefers-color-scheme: dark) {
+  .banner-warn { background: #2a2216; color: #f0d9b5; }
 }

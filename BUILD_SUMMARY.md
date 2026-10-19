@@ -1,100 +1,105 @@
-# OSINT Workbench Platform — v0.11.0 Build Summary
+# OSINT Workbench Platform — v0.12.0 Build Summary
 
-**Repo:** `Legend8891/osint-workbench-platform` (the most developed *original* OSINT project on the account — 65 own commits; all other OSINT repos are forks with 0–1 own commits).
-**Release:** 0.11.0 (from 0.7.0/0.8.0)
-**Status:** ✅ Builds clean, server runs, all new endpoints + UI flows smoke-tested.
+**Repo:** `Legend8891/osint-workbench-platform`
+**Release:** 0.12.0 (from 0.11.0)
+**Status:** ✅ Builds clean, lints clean, 40/40 tests pass, server runs, new endpoints smoke-tested.
+
+This release implements the improvement plan from `REVIEW.md`: a set of quick-win fixes, a completed core loop, two new keyless providers, and a real test + CI story.
 
 ---
 
-## Why this repo
-Using the GitHub API I compared every repo on the account. Only two are original work:
-- `osint-workbench-platform` — 65 own commits, full TypeScript monorepo (React + Express + shared Zod).
-- `SAAS_OSINT` — 4 commits (stub).
+## Phase A — Quick wins (polish & hardening)
 
-Everything else (`spiderfoot`, `maigret`, `web-check`, `Mr.Holmes`, `user-scanner`, `mantis-posture`) is a **fork** with 0–1 own commits. So `osint-workbench-platform` is the right thing to keep building.
+| # | Change | Where |
+|---|--------|-------|
+| A1 | **PWA icons** — added `icon-192.png`, `icon-512.png`, `favicon.ico`, `apple-touch-icon.png`; manifest now points at real files with a dark `background_color`. | `client/public/*`, `client/index.html`, `manifest.webmanifest` |
+| A2 | **Filename sanitising** — every export (JSON, HTML, GraphML, ZIP) runs the case name through `sanitizeFilename`. | `client/src/lib/workbench.ts` |
+| A3 | **Full HTML report** — now renders entities, evidence, relationships, timeline, provenance and cross-case correlation, with print-friendly CSS and confidence badges. | `client/src/lib/workbench.ts` |
+| A4 | **Content-based entity dedupe** — provider results merge by `type\|name`, unioning identifiers instead of minting duplicates. | `client/src/lib/workbench.ts` |
+| A5 | **Verification integrity** — promoting confidence clears `verifiedAt`/`verifiedBy`; re-verifying is idempotent (no duplicate provenance). | `client/src/lib/workbench.ts` |
+| A6 | **Security headers + CORS** — `helmet` with a strict CSP; CORS allow-list via `ALLOWED_ORIGINS`. | `server/src/index.ts` |
+| A7 | **Source maps off + real version** — production builds ship no `.map`; `/health` reads the version from `package.json`. | `client/vite.config.ts`, `server/src/index.ts` |
+| A8 | **Trusted rate-limit key + graceful shutdown** — rate limiting keys on `req.ip`; `SIGTERM`/`SIGINT` close the server cleanly. | `server/src/middleware/rateLimit.ts`, `server/src/index.ts` |
 
-## Problems found (gap analysis)
-1. **Almost nothing worked out of the box** — nearly every provider (HIBP, Hunter, Shodan, VirusTotal, AbuseIPDB, Numverify) needed a *paid* API key. Only Sherlock ran keyless.
-2. **No verification workflow** — the app's whole philosophy is *"POSSIBLE until verified"*, but there was no way to actually verify anything.
-3. **No persistence** — every case vanished on page reload.
-4. **No case management** — couldn't rename or delete a case.
-5. **SpiderFoot was wired on the server but not in the UI.**
-6. **No relationship creation** and no confidence colour-coding.
+## Phase B — Core loop
 
-## What was built
+- **B1 — Case import.** Export a case to JSON, then import it back through the shared Zod schema (`parseImportedCase`), with a unique-id guard (`withUniqueId`) and a readable error banner. A storage-full warning now appears if `localStorage` writes fail.
+- **B2 — GraphML correlation.** Exported graphs carry a per-node `correlation` data key listing the cross-case tokens an entity participates in.
+- **B3 — Stats + unknown types.** The header now shows the (previously dead) attachments stat, and a free-recon run that matches no provider says so explicitly instead of failing silently.
 
-### 1. Free, no-key recon (the big win — usable immediately)
-Seven new providers that need **zero API keys**, all with graceful failure:
-| Provider | Source | Endpoint |
-|---|---|---|
-| DNS | Cloudflare DNS-over-HTTPS | `POST /api/scan/dns` |
-| RDAP WHOIS | rdap.org | `POST /api/scan/rdap` |
-| Certificate transparency | crt.sh | `POST /api/scan/crtsh` |
-| Host search | HackerTarget | `POST /api/scan/hostsearch` |
-| IP geolocation | ipwho.is | `POST /api/scan/ipgeo` |
-| Gravatar | gravatar.com | `POST /api/scan/gravatar` |
-| Wayback Machine | archive.org | `POST /api/scan/wayback` |
+## Phase C — Two new keyless providers
 
-Plus a **combined auto-detect** endpoint `POST /api/scan/free` that classifies the target (domain / IP / email / URL) and runs every applicable provider in one shot. New file: `server/src/services/freerecon.ts` (780 lines) + `server/src/routes/free.ts`.
+| Provider | Source | Endpoint | Returns |
+|---|---|---|---|
+| **Shodan InternetDB** | internetdb.shodan.io | `POST /api/scan/internetdb` | open ports, CVEs, hostnames, CPEs, tags |
+| **IP RDAP** | rdap.org | `POST /api/scan/iprdap` | registered network block, country, org |
 
-All results flow through the existing throttle/backoff and merge into the active case as entities + evidence + provenance.
+Both are wired into the combined `POST /api/scan/free` auto-detect (IP branch), the framework catalog, and `/health` (`freeProviders` now lists **9** ids).
 
-### 2. Analyst verification workflow
-- Shared schema gained `verified`, `verifiedAt`, `verifiedBy` on entities **and** evidence, plus a `CONFIDENCE_ORDER` ladder and `promoteConfidence()` helper.
-- New client actions per finding: **Promote ▲** (one rung up), **Verify ✓** (pins to High, stamps who/when, appends a provenance entry), **Unverify**, **Delete**.
-- Tools *never* auto-verify — only the analyst can, preserving the "POSSIBLE until verified" invariant.
+## Phase D — Quality
 
-### 3. Persistence & case management
-- Cases persist to `localStorage` (`osint-workbench-cases-v1`) and survive reloads.
-- Rename and delete cases from the Cases tab.
-
-### 4. UI polish
-- Confidence **badges** (High/Medium/Low/Unverified) with colour coding.
-- **Verified cards** get a highlighted border.
-- **Provider status chips** in the header (version, free providers, keyed, missing keys) fed by `/health`.
-- **Relationship editor** in the Graph tab (link two entities with a typed relationship).
-- Free recon and SpiderFoot are now **wired into the Lookup tab**.
-- Fixed the tab grid (was hard-coded to 7 columns for 8 tabs → now `auto-fit`).
-
-### 5. Docs & versions
-- README rewritten to document free recon, verification, persistence, and endpoints.
-- `.env.example` notes that free recon needs no keys.
-- All package versions bumped to 0.11.0.
+- **D1 — Vitest.** 40 unit tests over the pure logic:
+  - `shared`: confidence ladder, `isVerified`, `caseSchema` validation.
+  - `client`: `sanitizeFilename`, `buildCorrelationHits`, `buildGraphML`, `mergeProviderIntoCase` (dedupe + verified-preservation), `parseImportedCase`/`withUniqueId`, case mutations, verification workflow.
+  - `server`: `inferTargetType`, `FREE_PROVIDER_IDS`.
+- **D2 — GitHub Actions CI.** `.github/workflows/ci.yml` runs `npm ci` → build → lint → test on every push/PR to `main`.
+- **ESLint fixed.** The repo's `lint` script was broken (no config for ESLint 9). Added flat configs for client and server (`typescript-eslint` + `react-hooks`), fixed the 2 real errors they surfaced, and removed the 2 `any` warnings.
 
 ## Verification performed
-- `npm run build` — clean, **no TypeScript errors**.
-- Server boots on port 8787; `/health` reports `version 0.11.0`, `freeProviders: [dns, rdap, crtsh, hostsearch, ipgeo, gravatar, wayback]`.
-- Live smoke tests (via curl **and** the browser):
-  - `example.com` → DNS (9 records), RDAP (9), HackerTarget (1), Wayback (1); crt.sh degrades gracefully.
-  - `github.com` → DNS (34), RDAP (15), HackerTarget (14), Wayback (1).
-  - `8.8.8.8` → auto-detected as `ip` → ipwho.is geo (San Jose, Google LLC).
-  - `test@gmail.com` → auto-detected as `email` → Gravatar.
-  - UI: created a case → ran free recon → merged findings → **verified** an entity (→ High ✓, "Verified by analyst", provenance entry, stat "Verified findings: 1") → **reloaded** and confirmed persistence → added a relationship → renamed the case.
+
+- `npm ci` → `npm run build` → `npm run lint` → `npm test` — **all exit 0** from a clean install.
+- Server boots; `/health` reports `version 0.12.0` and the 9 free providers.
+- Response headers confirmed: `Content-Security-Policy`, `X-Frame-Options`, `Strict-Transport-Security`, `Cross-Origin-Opener-Policy`, `X-Content-Type-Options`.
+- Graceful shutdown confirmed: `SIGTERM` → "shutting down gracefully… HTTP server closed."
+- Live smoke tests:
+  - `1.1.1.1` → InternetDB (ports 53/80/443/…), IP RDAP (Cloudflare range).
+  - `8.8.8.8` → auto-detected as `ip` → ipwho.is geo + InternetDB + IP RDAP (GOGL, 8.8.8.0–8.8.8.255, Google LLC).
+  - `example.com` → DNS, RDAP, HackerTarget, Wayback (crt.sh degrades gracefully on 502).
+  - `someusername` → 0 providers, with an explicit "no free provider matches" note.
 
 ## Files changed
+
 ```
-shared/src/index.ts               verification fields + confidence helpers
-server/src/services/freerecon.ts  7 free providers + auto-detect  (NEW)
-server/src/routes/free.ts         /api/scan/* free routes         (NEW)
-server/src/services/framework.ts  "Free Recon (no key)" catalog category
-server/src/index.ts               mount free router, health, v0.11.0
-client/src/lib/workbench.ts       persistence, verification, case mgmt, relationships, free wrappers
-client/src/pages/App.tsx          full rewrite of the UI
-client/src/styles/app.css         badges, chips, verified/selected cards, action variants
-README.md / .env.example          docs
-package.json (+ workspaces)       version 0.11.0
+shared/src/index.ts                     (unchanged this release; tests added)
+shared/src/index.test.ts                (NEW) shared unit tests
+server/src/index.ts                     helmet, CORS allow-list, version-from-pkg, graceful shutdown
+server/src/middleware/rateLimit.ts      req.ip-based key
+server/src/services/freerecon.ts        + InternetDB, + IP RDAP, auto-detect wiring
+server/src/services/freerecon.test.ts   (NEW) server unit tests
+server/src/services/framework.ts        register the two new providers
+server/src/services/sherlock.ts         lint fix (regex escape)
+server/src/services/spiderfoot.ts       lint fix (prefer-const)
+server/src/routes/free.ts               /internetdb, /iprdap routes
+server/eslint.config.js                 (NEW) flat config
+client/src/lib/workbench.ts             sanitising, report, dedupe, import, GraphML, helpers
+client/src/lib/workbench.test.ts        (NEW) client unit tests
+client/src/pages/App.tsx                import UI, storage warning, attachments stat, HitLike type
+client/src/styles/app.css               banner + responsive stats grid
+client/src/public/*                     (NEW) PWA icons
+client/index.html, manifest.webmanifest icon links
+client/vite.config.ts                   source maps off by default
+client/eslint.config.js                 (NEW) flat config
+.github/workflows/ci.yml                (NEW) CI
+vitest.config.ts                        (NEW) test config
+package.json (+ workspaces)             version 0.12.0, test scripts
+README.md / BUILD_SUMMARY.md / .gitignore
 ```
 
 ## How to run
+
 ```bash
 cd osint-workbench-platform
 npm install
 npm run build
 npm start          # → http://localhost:8787
 ```
-Or for development: `npm run dev` (client on :5173, API on :8787).
+
+Development: `npm run dev` (client on :5173, API on :8787).
+Tests: `npm test`. Lint: `npm run lint`.
 
 ## Notes / limitations
-- **crt.sh** is frequently overloaded (returns HTTP 502) and is blocked from this particular sandbox; the code retries 3× with backoff and then reports a friendly "try again shortly" message. It works from normal networks.
+
+- **crt.sh** is frequently overloaded (HTTP 502); the code retries 3× with backoff and then reports a friendly "try again shortly" message.
 - **SpiderFoot** needs the CLI on the host (`SPIDERFOOT_BIN`) — not available on typical free hosting.
-- The public port-exposure URL did not route in this sandbox (CloudFront returned 403); run locally with the commands above.
+- **Shodan InternetDB** only covers IPs Shodan has seen; a 404 is a normal "no data" answer, surfaced as such.
+- Previous release: see git history for the v0.11.0 summary (free recon + verification workflow).

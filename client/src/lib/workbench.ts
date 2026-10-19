@@ -7,7 +7,7 @@ import type {
   EvidenceRecord,
   RelationshipRecord,
 } from 'shared';
-import { promoteConfidence } from 'shared';
+import { promoteConfidence, caseSchema } from 'shared';
 import { escapeXml, escapeHtml } from './escape';
 
 function normalizeToken(raw: string): string {
@@ -47,65 +47,194 @@ export function downloadJson(data: unknown, filename: string) {
   setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }
 
-function sanitizeFilename(name: string): string {
+export function sanitizeFilename(name: string): string {
   return name.replace(/[^\w.\- ]+/g, '_').trim() || 'case';
 }
 
 export function exportHtmlReport(record: CaseRecord, correlationHits: CorrelationHit[]) {
-  const hitsHtml = correlationHits
-    .map(
-      (h) =>
-        '<li><strong>' +
-        escapeHtml(h.token) +
-        '</strong> — ' +
-        h.matches.length +
-        ' matches<ul>' +
-        h.matches
-          .map(
-            (m) =>
-              '<li>' +
-              escapeHtml(m.caseName) +
-              ' / ' +
-              escapeHtml(m.entityName) +
-              ' (' +
-              escapeHtml(m.entityType) +
-              ')</li>'
-          )
-          .join('') +
-        '</ul></li>'
-    )
-    .join('');
+  const badge = (confidence: string, verified?: boolean) =>
+    '<span class="badge badge-' +
+    escapeHtml(confidence.toLowerCase()) +
+    '">' +
+    escapeHtml(confidence) +
+    (verified ? ' &#10003;' : '') +
+    '</span>';
+
+  const section = (title: string, inner: string) =>
+    '<section><h2>' + escapeHtml(title) + '</h2>' + inner + '</section>';
+
+  const entitiesHtml = record.entities.length
+    ? '<ul class="cards">' +
+      record.entities
+        .map(
+          (e) =>
+            '<li><strong>' +
+            escapeHtml(e.name) +
+            '</strong> <em>(' +
+            escapeHtml(e.type) +
+            ')</em> ' +
+            badge(e.confidence, e.verified) +
+            (e.identifiers.length
+              ? '<div class="muted">' + escapeHtml(e.identifiers.join(' · ')) + '</div>'
+              : '') +
+            (e.notes ? '<div class="muted">' + escapeHtml(e.notes) + '</div>' : '') +
+            (e.verified && e.verifiedBy
+              ? '<div class="muted">Verified by ' +
+                escapeHtml(e.verifiedBy) +
+                (e.verifiedAt ? ' · ' + escapeHtml(new Date(e.verifiedAt).toLocaleString()) : '') +
+                '</div>'
+              : '') +
+            '</li>'
+        )
+        .join('') +
+      '</ul>'
+    : '<p class="muted">None</p>';
+
+  const evidenceHtml = record.evidence.length
+    ? '<ul class="cards">' +
+      record.evidence
+        .map(
+          (ev) =>
+            '<li><strong>' +
+            escapeHtml(ev.title) +
+            '</strong> ' +
+            badge(ev.confidence, ev.verified) +
+            (ev.url
+              ? '<div><a href="' + escapeHtml(ev.url) + '">' + escapeHtml(ev.url) + '</a></div>'
+              : '') +
+            (ev.notes ? '<div class="muted">' + escapeHtml(ev.notes) + '</div>' : '') +
+            (ev.tags.length
+              ? '<div class="muted">' + escapeHtml(ev.tags.join(', ')) + '</div>'
+              : '') +
+            '</li>'
+        )
+        .join('') +
+      '</ul>'
+    : '<p class="muted">None</p>';
+
+  const entityName = (id: string) =>
+    record.entities.find((e) => e.id === id)?.name ?? id;
+  const relationshipsHtml = record.relationships.length
+    ? '<ul class="cards">' +
+      record.relationships
+        .map(
+          (rel) =>
+            '<li>' +
+            escapeHtml(entityName(rel.sourceId)) +
+            ' &rarr; ' +
+            escapeHtml(entityName(rel.targetId)) +
+            ' <em>(' +
+            escapeHtml(rel.type) +
+            ')</em> ' +
+            badge(rel.confidence) +
+            '</li>'
+        )
+        .join('') +
+      '</ul>'
+    : '<p class="muted">None</p>';
+
+  const timelineHtml = record.events.length
+    ? '<ul class="cards">' +
+      record.events
+        .map(
+          (ev) =>
+            '<li><strong>' +
+            escapeHtml(ev.date) +
+            '</strong> — ' +
+            escapeHtml(ev.title) +
+            (ev.notes ? '<div class="muted">' + escapeHtml(ev.notes) + '</div>' : '') +
+            '</li>'
+        )
+        .join('') +
+      '</ul>'
+    : '<p class="muted">None</p>';
+
+  const provenanceHtml = record.provenance.length
+    ? '<ul class="cards">' +
+      record.provenance
+        .map(
+          (p) =>
+            '<li>' +
+            escapeHtml(p.claim) +
+            (p.notes ? '<div class="muted">' + escapeHtml(p.notes) + '</div>' : '') +
+            '</li>'
+        )
+        .join('') +
+      '</ul>'
+    : '<p class="muted">None</p>';
+
+  const hitsHtml = correlationHits.length
+    ? '<ul class="cards">' +
+      correlationHits
+        .map(
+          (h) =>
+            '<li><strong>' +
+            escapeHtml(h.token) +
+            '</strong> — ' +
+            h.matches.length +
+            ' matches<ul>' +
+            h.matches
+              .map(
+                (m) =>
+                  '<li>' +
+                  escapeHtml(m.caseName) +
+                  ' / ' +
+                  escapeHtml(m.entityName) +
+                  ' (' +
+                  escapeHtml(m.entityType) +
+                  ')</li>'
+              )
+              .join('') +
+            '</ul></li>'
+        )
+        .join('') +
+      '</ul>'
+    : '<p class="muted">None</p>';
+
+  const style =
+    'body{font-family:Inter,system-ui,-apple-system,sans-serif;color:#28251d;background:#fff;max-width:52rem;margin:0 auto;padding:2rem;line-height:1.5}' +
+    'h1{margin-bottom:.25rem}h2{border-bottom:1px solid #ddd;padding-bottom:.25rem;margin-top:1.5rem}' +
+    '.muted{color:#6f6d68;font-size:.85rem}.cards{list-style:none;padding:0;display:grid;gap:.5rem}' +
+    '.cards li{border:1px solid #e2e0da;border-radius:10px;padding:.6rem .8rem}' +
+    '.badge{display:inline-block;padding:.05rem .5rem;border-radius:999px;font-size:.7rem;font-weight:600;color:#fff;background:#6f6d68}' +
+    '.badge-high{background:#1c7c54}.badge-medium{background:#a15c00}.badge-low{background:#6f6d68}.badge-unverified{background:#8a6d3b}' +
+    'a{color:#01696f;word-break:break-all}' +
+    '@media print{body{padding:0}.cards li{break-inside:avoid}}';
 
   const html =
-    '<!doctype html><html lang="en"><head><meta charset="UTF-8"><title>' +
+    '<!doctype html><html lang="en"><head><meta charset="UTF-8">' +
+    '<meta name="viewport" content="width=device-width, initial-scale=1">' +
+    '<title>' +
     escapeHtml(record.name) +
-    ' — OSINT Report</title></head><body><h1>' +
+    ' — OSINT Report</title><style>' +
+    style +
+    '</style></head><body>' +
+    '<h1>' +
     escapeHtml(record.name) +
-    '</h1><p>' +
+    '</h1>' +
+    '<p class="muted">' +
+    escapeHtml(record.type) +
+    (record.location ? ' · ' + escapeHtml(record.location) : '') +
+    ' · generated ' +
+    escapeHtml(new Date().toLocaleString()) +
+    '</p>' +
+    '<p>' +
     escapeHtml(record.report.summary) +
     '</p><p>' +
     escapeHtml(record.report.next) +
-    '</p><h2>Entities</h2><ul>' +
-    record.entities
-      .map(
-        (e) =>
-          '<li><strong>' +
-          escapeHtml(e.name) +
-          '</strong> (' +
-          escapeHtml(e.type) +
-          ') — ' +
-          escapeHtml(e.confidence) +
-          '</li>'
-      )
-      .join('') +
-    '</ul><h2>Correlation</h2>' +
-    (correlationHits.length ? '<ul>' + hitsHtml + '</ul>' : '<p>None</p>') +
+    '</p>' +
+    section('Entities', entitiesHtml) +
+    section('Evidence', evidenceHtml) +
+    section('Relationships', relationshipsHtml) +
+    section('Timeline', timelineHtml) +
+    section('Provenance', provenanceHtml) +
+    section('Cross-case correlation', hitsHtml) +
     '</body></html>';
 
   const blob = new Blob([html], { type: 'text/html' });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
-  link.download = record.name + '.html';
+  link.download = sanitizeFilename(record.name) + '.html';
   link.click();
   setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }
@@ -118,18 +247,32 @@ export async function exportBundleZip(record: CaseRecord, correlationHits: Corre
   const blob = await zip.generateAsync({ type: 'blob' });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
-  link.download = record.name + '.zip';
+  link.download = sanitizeFilename(record.name) + '.zip';
   link.click();
   setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }
 
 export function buildGraphML(
   record: CaseRecord,
-  _correlationHits: CorrelationHit[] = []
+  correlationHits: CorrelationHit[] = []
 ): string {
   const entityIds = new Set(record.entities.map((e) => e.id));
+  // Map entityId -> cross-case tokens it participates in (this case only).
+  const corrByEntity = new Map<string, string[]>();
+  for (const hit of correlationHits) {
+    for (const m of hit.matches) {
+      if (m.caseId !== record.id) continue;
+      const list = corrByEntity.get(m.entityId) ?? [];
+      list.push(hit.token);
+      corrByEntity.set(m.entityId, list);
+    }
+  }
   const nodesXml = record.entities
     .map((e) => {
+      const corr = corrByEntity.get(e.id);
+      const corrXml = corr?.length
+        ? '\n      <data key="correlation">' + escapeXml([...new Set(corr)].join(', ')) + '</data>'
+        : '';
       return (
         '    <node id="' +
         escapeXml(e.id) +
@@ -139,7 +282,9 @@ export function buildGraphML(
         escapeXml(e.type) +
         '</data>\n      <data key="confidence">' +
         escapeXml(e.confidence) +
-        '</data>\n    </node>'
+        '</data>' +
+        corrXml +
+        '\n    </node>'
       );
     })
     .join('\n');
@@ -166,6 +311,7 @@ export function buildGraphML(
     '  <key id="label" for="node" attr.name="label" attr.type="string"/>\n' +
     '  <key id="type" for="node" attr.name="type" attr.type="string"/>\n' +
     '  <key id="confidence" for="node" attr.name="confidence" attr.type="string"/>\n' +
+    '  <key id="correlation" for="node" attr.name="correlation" attr.type="string"/>\n' +
     '  <key id="edgelabel" for="edge" attr.name="label" attr.type="string"/>\n' +
     '  <graph id="' +
     escapeXml(record.id) +
@@ -240,6 +386,46 @@ export async function runSherlockScan(usernames: string[]): Promise<SherlockApiR
   return res.json() as Promise<SherlockApiResponse>;
 }
 
+/** Stable identity for an entity: type + normalised name. */
+function entityKey(e: { type: string; name: string }): string {
+  return `${e.type.toLowerCase()}|${e.name.trim().toLowerCase()}`;
+}
+
+/** Merge incoming entities into a list, de-duplicating by type+name and
+ *  unioning identifiers so re-running a lookup enriches instead of duplicating. */
+function mergeEntityList(existing: EntityRecord[], incoming: EntityRecord[]): EntityRecord[] {
+  const out = [...existing];
+  for (const ent of incoming) {
+    const key = entityKey(ent);
+    const idx = out.findIndex((e) => entityKey(e) === key);
+    if (idx === -1) {
+      out.push(ent);
+      continue;
+    }
+    const prev = out[idx];
+    out[idx] = {
+      ...prev,
+      identifiers: [...new Set([...prev.identifiers, ...ent.identifiers])],
+      notes: prev.notes.length >= ent.notes.length ? prev.notes : ent.notes,
+      // never downgrade an analyst-verified entity
+      confidence: prev.verified ? prev.confidence : prev.confidence,
+      verified: prev.verified,
+      verifiedAt: prev.verifiedAt,
+      verifiedBy: prev.verifiedBy,
+    };
+  }
+  return out;
+}
+
+/** Merge evidence, de-duplicating by title+url. */
+function mergeEvidenceList(existing: EvidenceRecord[], incoming: EvidenceRecord[]): EvidenceRecord[] {
+  const out = [...existing];
+  for (const ev of incoming) {
+    if (!out.some((e) => e.title === ev.title && e.url === ev.url)) out.push(ev);
+  }
+  return out;
+}
+
 export function mergeScanIntoCase(
   record: CaseRecord,
   results: SherlockScanResult[]
@@ -253,12 +439,8 @@ export function mergeScanIntoCase(
   };
   const now = new Date().toISOString().slice(0, 10);
   for (const result of results) {
-    for (const entity of result.entities) {
-      if (!next.entities.some((e) => e.id === entity.id)) next.entities.push(entity);
-    }
-    for (const ev of result.evidence) {
-      if (!next.evidence.some((e) => e.id === ev.id)) next.evidence.push(ev);
-    }
+    next.entities = mergeEntityList(next.entities, result.entities);
+    next.evidence = mergeEvidenceList(next.evidence, result.evidence);
     for (const p of result.provenance) {
       if (!next.provenance.some((x) => x.id === p.id)) next.provenance.push(p);
     }
@@ -419,12 +601,8 @@ export function mergeProviderIntoCase(
   const now = new Date().toISOString().slice(0, 10);
   for (const result of results) {
     if (!result.ok) continue;
-    for (const entity of result.entities) {
-      if (!next.entities.some((e) => e.id === entity.id)) next.entities.push(entity);
-    }
-    for (const ev of result.evidence) {
-      if (!next.evidence.some((e) => e.id === ev.id)) next.evidence.push(ev);
-    }
+    next.entities = mergeEntityList(next.entities, result.entities);
+    next.evidence = mergeEvidenceList(next.evidence, result.evidence);
     for (const p of result.provenance) {
       if (!next.provenance.some((x) => x.id === p.id)) next.provenance.push(p);
     }
@@ -460,12 +638,39 @@ export function loadCases(): CaseRecord[] {
   }
 }
 
-export function saveCases(cases: CaseRecord[]): void {
+export function saveCases(cases: CaseRecord[]): boolean {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(cases));
+    return true;
   } catch {
-    /* quota exceeded / private mode — ignore */
+    /* quota exceeded / private mode */
+    return false;
   }
+}
+
+/** Parse + validate an exported case JSON file. Throws with a readable message. */
+export function parseImportedCase(raw: string): CaseRecord {
+  let data: unknown;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    throw new Error('Not valid JSON.');
+  }
+  const parsed = caseSchema.safeParse(data);
+  if (!parsed.success) {
+    const detail = parsed.error.issues
+      .slice(0, 3)
+      .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
+      .join('; ');
+    throw new Error(`Invalid case file — ${detail}`);
+  }
+  return parsed.data as CaseRecord;
+}
+
+/** Ensure an imported case has a unique id within the existing set. */
+export function withUniqueId(record: CaseRecord, existing: CaseRecord[]): CaseRecord {
+  if (!existing.some((c) => c.id === record.id)) return record;
+  return { ...record, id: `${record.id}-${Date.now().toString(36)}` };
 }
 
 /* ------------------------------------------------------------------ */
@@ -504,7 +709,13 @@ export function promoteEntityConfidence(record: CaseRecord, entityId: string): C
     ...record,
     entities: record.entities.map((e) =>
       e.id === entityId
-        ? { ...e, confidence: promoteConfidence(e.confidence), verified: false }
+        ? {
+            ...e,
+            confidence: promoteConfidence(e.confidence),
+            verified: false,
+            verifiedAt: undefined,
+            verifiedBy: undefined,
+          }
         : e
     ),
   });
@@ -517,6 +728,8 @@ export function verifyEntity(
 ): CaseRecord {
   const now = new Date().toISOString();
   const target = record.entities.find((e) => e.id === entityId);
+  // Idempotent: re-verifying must not append duplicate provenance.
+  if (target?.verified) return record;
   return touchReport({
     ...record,
     entities: record.entities.map((e) =>
@@ -553,7 +766,13 @@ export function promoteEvidenceConfidence(record: CaseRecord, evidenceId: string
     ...record,
     evidence: record.evidence.map((e) =>
       e.id === evidenceId
-        ? { ...e, confidence: promoteConfidence(e.confidence), verified: false }
+        ? {
+            ...e,
+            confidence: promoteConfidence(e.confidence),
+            verified: false,
+            verifiedAt: undefined,
+            verifiedBy: undefined,
+          }
         : e
     ),
   });
@@ -566,6 +785,8 @@ export function verifyEvidence(
 ): CaseRecord {
   const now = new Date().toISOString();
   const target = record.evidence.find((e) => e.id === evidenceId);
+  // Idempotent: re-verifying must not append duplicate provenance.
+  if (target?.verified) return record;
   return touchReport({
     ...record,
     evidence: record.evidence.map((e) =>
@@ -675,6 +896,14 @@ export function lookupCrtSh(domain: string) {
 
 export function lookupIpGeo(ip: string) {
   return postJson<ProviderLookupResult>('/api/scan/ipgeo', { ip });
+}
+
+export function lookupInternetDb(ip: string) {
+  return postJson<ProviderLookupResult>('/api/scan/internetdb', { ip });
+}
+
+export function lookupIpRdap(ip: string) {
+  return postJson<ProviderLookupResult>('/api/scan/iprdap', { ip });
 }
 
 export function lookupGravatar(email: string) {

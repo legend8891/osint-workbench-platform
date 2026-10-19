@@ -27,6 +27,9 @@ import {
   mergeProviderIntoCase,
   loadCases,
   saveCases,
+  parseImportedCase,
+  withUniqueId,
+  sanitizeFilename,
   renameCase,
   deleteCase,
   promoteEntityConfidence,
@@ -64,6 +67,9 @@ type HealthInfo = {
   providersMissing: string[];
   freeProviders: string[];
 };
+
+/** A provider hit is either a bare string or a structured object. */
+type HitLike = string | { title?: string; url?: string; detail?: string; tags?: string[] };
 
 const CONFIDENCE_CLASS: Record<string, string> = {
   High: 'badge badge-high',
@@ -133,6 +139,10 @@ export function App() {
   const [relTarget, setRelTarget] = useState('');
   const [relType, setRelType] = useState('');
 
+  const [importError, setImportError] = useState<string | null>(null);
+  const [storageWarning, setStorageWarning] = useState(false);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+
   const hydrated = useRef(false);
 
   const activeCase = useMemo(
@@ -159,7 +169,7 @@ export function App() {
       hydrated.current = true;
       return;
     }
-    saveCases(cases);
+    setStorageWarning(!saveCases(cases));
   }, [cases]);
 
   useEffect(() => {
@@ -210,6 +220,23 @@ export function App() {
   function handleRenameCase() {
     if (!activeCase) return;
     setCases(renameCase(cases, activeCase.id, renameValue));
+  }
+
+  async function handleImportFile(file: File | null | undefined) {
+    if (!file) return;
+    setImportError(null);
+    try {
+      const text = await file.text();
+      const parsed = parseImportedCase(text);
+      const record = withUniqueId(parsed, cases);
+      setCases((prev) => [...prev, record]);
+      setActiveCaseId(record.id);
+      setActiveTab('cases');
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Failed to import case');
+    } finally {
+      if (importInputRef.current) importInputRef.current.value = '';
+    }
   }
 
   async function loadFramework() {
@@ -269,14 +296,21 @@ export function App() {
       const bundle = await lookupFreeRecon(target);
       setLastFree(bundle);
       updateCase(mergeProviderIntoCase(base, bundle.results));
+      const providerLines = bundle.results.map((r) =>
+        r.ok
+          ? `${r.provider}: ${r.rawSummary || `${r.hits.length} hit(s)`} · entities=${r.entities.length} evidence=${r.evidence.length}`
+          : `${r.provider} FAILED: ${r.error || 'unknown error'}`
+      );
       setFreeLog([
         `Detected target type: ${bundle.queryType}`,
-        ...bundle.results.map((r) =>
-          r.ok
-            ? `${r.provider}: ${r.rawSummary || `${r.hits.length} hit(s)`} · entities=${r.entities.length} evidence=${r.evidence.length}`
-            : `${r.provider} FAILED: ${r.error || 'unknown error'}`
-        ),
-        'Merged into case — open Entities / Evidence tabs.',
+        ...(bundle.results.length === 0
+          ? [
+              'No free provider matches this target type. Free recon covers domains, IPs, emails, and URLs. For usernames use the keyed Sherlock scan; for people add Hunter/HIBP keys.',
+            ]
+          : providerLines),
+        ...(bundle.results.length > 0
+          ? ['Merged into case — open Entities / Evidence tabs.']
+          : []),
       ]);
     } catch (err) {
       setFreeLog([err instanceof Error ? err.message : 'Free recon failed']);
@@ -436,9 +470,9 @@ export function App() {
           <h1>Live lookups only — no sample profiles</h1>
           <p>
             Free no-key recon works out of the box (DNS, RDAP WHOIS, CT logs, host search, IP
-            geo, Gravatar, Wayback). Paid providers (HIBP, Hunter, Shodan, VirusTotal, AbuseIPDB,
-            Numverify) activate when their keys are set. Nothing is invented — every finding stays
-            POSSIBLE until you verify it.
+            geo, Shodan InternetDB, IP RDAP, Gravatar, Wayback). Paid providers (HIBP, Hunter,
+            Shodan, VirusTotal, AbuseIPDB, Numverify) activate when their keys are set. Nothing is
+            invented — every finding stays POSSIBLE until you verify it.
           </p>
           {health && (
             <div className="provider-status">
@@ -465,11 +499,22 @@ export function App() {
             <strong>{stats.correlations}</strong>
           </div>
           <div>
+            <span>Attachments</span>
+            <strong>{stats.attachments}</strong>
+          </div>
+          <div>
             <span>Verified findings</span>
             <strong>{stats.verified}</strong>
           </div>
         </div>
       </header>
+
+      {storageWarning && (
+        <div className="banner banner-warn" role="alert">
+          <strong>Local storage is full.</strong> Your latest changes could not be saved to this
+          browser. Export your cases as JSON or a bundle to avoid losing work.
+        </div>
+      )}
 
       <nav className="tabs">
         {tabs.map((tab) => (
@@ -491,7 +536,22 @@ export function App() {
               <button className="action" onClick={newCase}>
                 New empty case
               </button>
+              <button className="action ghost" onClick={() => importInputRef.current?.click()}>
+                Import case JSON
+              </button>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept=".json,application/json"
+                style={{ display: 'none' }}
+                onChange={(e) => void handleImportFile(e.target.files?.[0])}
+              />
             </div>
+            {importError && (
+              <div className="line-item" role="alert" style={{ color: '#f87171' }}>
+                Import failed: {importError}
+              </div>
+            )}
             {cases.length === 0 && (
               <div className="line-item muted">
                 No cases yet. Create one, then use Lookup for live API results only.
@@ -726,7 +786,7 @@ export function App() {
                     {!r.ok && <div className="muted">{r.error}</div>}
                     {r.ok && r.rawSummary ? <div className="muted">{r.rawSummary}</div> : null}
                     <ul className="match-list">
-                      {r.hits.slice(0, 25).map((h: any, i: number) => (
+                      {r.hits.slice(0, 25).map((h: HitLike, i: number) => (
                         <li key={i}>
                           {typeof h === 'string' ? (
                             h
@@ -755,7 +815,7 @@ export function App() {
                 {!r.ok && <div className="muted">{r.error}</div>}
                 {r.ok && r.rawSummary ? <div className="muted">{r.rawSummary}</div> : null}
                 <ul className="match-list">
-                  {r.hits.map((h: any, i: number) => (
+                  {r.hits.map((h: HitLike, i: number) => (
                     <li key={i}>
                       {typeof h === 'string' ? (
                         h
@@ -1101,7 +1161,7 @@ export function App() {
             <div className="actions-row">
               <button
                 className="action"
-                onClick={() => downloadJson(activeCase, `${activeCase.name}.json`)}
+                onClick={() => downloadJson(activeCase, sanitizeFilename(activeCase.name) + '.json')}
               >
                 Case JSON
               </button>

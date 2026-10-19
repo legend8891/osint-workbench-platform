@@ -5,7 +5,9 @@ import {
   lookupDns,
   lookupGravatar,
   lookupHostSearch,
+  lookupInternetDb,
   lookupIpGeo,
+  lookupIpRdap,
   lookupRdap,
   lookupWayback,
   runFreeRecon,
@@ -64,6 +66,12 @@ freeRouter.post('/hostsearch', handle(domainSchema, lookupHostSearch, 'HackerTar
 
 /** IP geolocation via ipwho.is. */
 freeRouter.post('/ipgeo', handle(ipSchema, lookupIpGeo, 'IP geolocation'));
+
+/** Shodan InternetDB exposure (open ports, CVEs, tags) for an IP. */
+freeRouter.post('/internetdb', handle(ipSchema, lookupInternetDb, 'InternetDB lookup'));
+
+/** IP RDAP registration (network block, country, org) for an IP. */
+freeRouter.post('/iprdap', handle(ipSchema, lookupIpRdap, 'IP RDAP lookup'));
 
 /** Gravatar profile for an email. */
 freeRouter.post('/gravatar', handle(emailSchema, lookupGravatar, 'Gravatar lookup'));

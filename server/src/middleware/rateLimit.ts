@@ -28,9 +28,12 @@ function maxForPath(path: string): number {
 }
 
 function clientKey(req: Request): string {
+  // `trust proxy` is enabled in index.ts, so req.ip already resolves the
+  // real client address from X-Forwarded-For (trusting one hop). Prefer it
+  // over reading the header directly, which a client could spoof.
+  if (req.ip) return req.ip;
   const xf = req.headers['x-forwarded-for'];
   if (typeof xf === 'string' && xf.length) return xf.split(',')[0]!.trim();
-  if (Array.isArray(xf) && xf[0]) return String(xf[0]).split(',')[0]!.trim();
   return req.socket.remoteAddress || 'unknown';
 }
 
