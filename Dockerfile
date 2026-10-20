@@ -18,6 +18,12 @@ FROM node:20-bookworm-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=8787
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3 python3-pip \
+ && pip3 install --no-cache-dir --break-system-packages sherlock-project \
+ && apt-get purge -y python3-pip \
+ && apt-get autoremove -y \
+ && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /app/package.json ./
 COPY --from=build /app/node_modules ./node_modules

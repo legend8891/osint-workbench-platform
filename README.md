@@ -11,7 +11,7 @@ iOS-first OSINT web application monorepo with React/Vite client, Express API, sh
 - PWA metadata for iPhone Safari / Add to Home Screen
 - JSZip evidence bundles
 - GraphML export (Maltego / Gephi / yEd)
-- Sherlock CLI or Node fallback for username enumeration
+- Sherlock CLI or a 40-site Node fallback for username enumeration
 - Vitest + GitHub Actions CI
 
 ## What's new in 0.12
@@ -25,7 +25,7 @@ iOS-first OSINT web application monorepo with React/Vite client, Express API, sh
 - **Tests + CI** — 40 Vitest unit tests over the pure logic, and a GitHub Actions workflow that builds, lints and tests on every push/PR.
 
 ## What's new in 0.11
-- **Free recon (no API keys)** — DNS-over-HTTPS, RDAP WHOIS, certificate transparency (crt.sh), HackerTarget host search, IP geolocation (ipwho.is), Gravatar, and the Wayback Machine. Works out of the box.
+- **Free recon (no API keys)** — usernames via Sherlock, plus DNS-over-HTTPS, RDAP WHOIS, certificate transparency (crt.sh), HackerTarget host search, IP geolocation (ipwho.is), Gravatar, and the Wayback Machine. Works out of the box.
 - **Auto-detect target type** — one endpoint classifies a domain / IP / email / URL and runs the applicable free providers.
 - **Analyst verification workflow** — promote confidence one rung at a time, or mark a finding *verified* (pinned to High, stamped with who/when, and recorded in provenance). Tools never verify.
 - **Persistence** — cases survive a page reload (localStorage).
@@ -73,7 +73,7 @@ docker run --rm -p 8787:8787 osint-workbench
 # → http://localhost:8787
 ```
 
-Without Sherlock CLI, the Node fallback still works. Extend the image with `pipx install sherlock-project` for the full site list.
+The production Docker image installs `sherlock-project` automatically. If the CLI is unavailable, the Node fallback checks 40 high-signal sites with per-request timeouts, bounded concurrency, browser headers, and distinct blocked/error statuses.
 
 ## Features
 
@@ -91,7 +91,7 @@ Without Sherlock CLI, the Node fallback still works. Extend the image with `pipx
 
 | Endpoint | Input | Provider |
 |----------|-------|----------|
-| `POST /api/scan/free` | `{ "target": "example.com" }` | auto-detect (runs all applicable) |
+| `POST /api/scan/free` | `{ "target": "octocat" }` | auto-detect (runs Sherlock for usernames, or all applicable providers) |
 | `POST /api/scan/dns` | `{ "domain": "example.com" }` | Cloudflare DNS-over-HTTPS |
 | `POST /api/scan/rdap` | `{ "domain": "example.com" }` | RDAP (rdap.org) |
 | `POST /api/scan/crtsh` | `{ "domain": "example.com" }` | crt.sh certificate transparency |
