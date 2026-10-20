@@ -17,6 +17,7 @@
 
 import { createHash, randomUUID } from 'node:crypto';
 import { withProviderThrottle } from './throttle.js';
+import { scanUsername } from './sherlock.js';
 import type {
   Confidence,
   ProviderEntity,
@@ -913,6 +914,34 @@ export type FreeReconResponse = {
   results: ProviderLookupResult[];
 };
 
+async function lookupUsername(username: string): Promise<ProviderLookupResult> {
+  const result = await scanUsername(username);
+  return {
+    provider: 'sherlock',
+    query: username,
+    queryType: 'username',
+    configured: true,
+    ok: true,
+    hits: result.hits.map((hit) => ({
+      title: `${hit.site}: ${hit.status}`,
+      url: hit.url,
+      detail: hit.httpStatus ? `HTTP ${hit.httpStatus}` : '',
+      tags: ['username', 'sherlock', hit.status, hit.source],
+    })),
+    rawSummary: `${result.mode}: ${result.hits.filter((hit) => hit.status === 'found').length} found; ${result.hits.length} sites checked`,
+    entities: result.entities.map((entity) => ({
+      id: entity.id,
+      name: entity.name,
+      type: entity.type,
+      identifiers: entity.identifiers,
+      confidence: entity.confidence,
+      notes: entity.notes,
+    })),
+    evidence: result.evidence.map((evidence) => ({ ...evidence })),
+    provenance: result.provenance.map((step) => ({ ...step })),
+  };
+}
+
 /**
  * Auto-detect the target type and run every applicable free provider.
  * No API keys required.
@@ -936,6 +965,8 @@ export async function runFreeRecon(target: string): Promise<FreeReconResponse> {
     tasks.push(lookupGravatar(query));
   } else if (queryType === 'url') {
     tasks.push(lookupWayback(query));
+  } else if (queryType === 'username') {
+    tasks.push(lookupUsername(query));
   }
 
   const results = tasks.length ? await Promise.all(tasks) : [];
@@ -957,4 +988,5 @@ export const FREE_PROVIDER_IDS = [
   'iprdap',
   'gravatar',
   'wayback',
+  'sherlock',
 ] as const;

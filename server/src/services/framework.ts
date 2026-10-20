@@ -39,7 +39,7 @@ export const FRAMEWORK_CATEGORIES: FrameworkCategory[] = [
     name: 'Free Recon (no key)',
     description: 'In-app providers that need no API key — DNS, WHOIS/RDAP, CT logs, host search, IP geo, InternetDB, IP RDAP, Gravatar, Wayback.',
     tools: [
-      { id: 'free-recon', name: 'Free Recon (auto)', description: 'Auto-detects domain/IP/email/URL and runs all applicable free providers.', url: '/api/scan/free', flag: 'free', opsec: 'passive', providerId: 'freerecon' },
+      { id: 'free-recon', name: 'Free Recon (auto)', description: 'Auto-detects username/domain/IP/email/URL and runs all applicable free providers.', url: '/api/scan/free', flag: 'free', opsec: 'passive', providerId: 'freerecon' },
       { id: 'dns', name: 'DNS records (DoH)', description: 'A/AAAA/MX/TXT/NS/CNAME via Cloudflare DNS-over-HTTPS.', url: '/api/scan/dns', flag: 'free', opsec: 'passive', providerId: 'dns' },
       { id: 'rdap', name: 'RDAP / WHOIS', description: 'Domain registration, registrar, nameservers, status.', url: '/api/scan/rdap', flag: 'free', opsec: 'passive', providerId: 'rdap' },
       { id: 'crtsh-inapp', name: 'crt.sh (in-app)', description: 'Subdomain discovery from Certificate Transparency logs.', url: '/api/scan/crtsh', flag: 'free', opsec: 'passive', providerId: 'crtsh' },

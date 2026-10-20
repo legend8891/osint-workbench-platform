@@ -286,7 +286,7 @@ export function App() {
   async function runFreeLookup() {
     const target = freeTarget.trim();
     if (!target) {
-      setFreeLog(['Enter a domain, IP, email, or URL']);
+      setFreeLog(['Enter a username, domain, IP, email, or URL']);
       return;
     }
     const base = ensureCase();
@@ -303,9 +303,9 @@ export function App() {
       );
       setFreeLog([
         `Detected target type: ${bundle.queryType}`,
-        ...(bundle.results.length === 0
-          ? [
-              'No free provider matches this target type. Free recon covers domains, IPs, emails, and URLs. For usernames use the keyed Sherlock scan; for people add Hunter/HIBP keys.',
+          ...(bundle.results.length === 0
+            ? [
+              'No free provider matches this target type. Free recon supports usernames, domains, IPs, emails, and URLs. For people add Hunter/HIBP keys.',
             ]
           : providerLines),
         ...(bundle.results.length > 0

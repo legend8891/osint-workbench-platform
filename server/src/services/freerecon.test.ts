@@ -31,6 +31,7 @@ describe('FREE_PROVIDER_IDS', () => {
   it('includes the new keyless providers', () => {
     expect(FREE_PROVIDER_IDS).toContain('internetdb');
     expect(FREE_PROVIDER_IDS).toContain('iprdap');
+    expect(FREE_PROVIDER_IDS).toContain('sherlock');
   });
 
   it('has no duplicate ids', () => {
